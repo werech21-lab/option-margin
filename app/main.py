@@ -38,8 +38,62 @@ TEMPLATES_DIR = pathlib.Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+EVAL_DATE = date(2026, 10, 30)
+
+
+def _persist_wd(db: Any, parsed: Any) -> WageDetermination:
+    row = WageDetermination(
+        wd_number=parsed.wd_number,
+        revision_number=parsed.revision_number,
+        locality_state=parsed.locality_state,
+        locality_county=parsed.locality_county,
+        source_published_at=parsed.source_published_at,
+        raw_content_hash=parsed.raw_content_hash,
+        semantic_rate_hash=parsed.semantic_rate_hash,
+        hw_rate_standard=parsed.hw_rate_standard,
+        hw_rate_eo13706=parsed.hw_rate_eo13706,
+        source_url=f"https://sam.gov/wage-determinations/{parsed.wd_number}/{parsed.revision_number}",
+    )
+    db.add(row)
+    db.flush()
+    for code, rate in parsed.occupation_rates.items():
+        db.add(
+            WDOccupationRate(
+                wd_id=row.id,
+                occupation_code=code,
+                occupation_title=parsed.occupation_titles.get(code, "Janitor"),
+                hourly_rate=rate,
+            )
+        )
+    return row
+
+
+def _payroll_row(
+    label: str,
+    regular_hours: str,
+    overtime_hours: str,
+    w_act: str,
+    job_code: str = "JAN-1",
+    scls: str | None = "23470",
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "employee_name": label,
+        "internal_job_code": job_code,
+        "regular_hours": regular_hours,
+        "overtime_hours": overtime_hours,
+        "vacation_holiday_hours": "0.0000",
+        "actual_prev_wage_rate": "16.5000",
+        "actual_new_wage_rate": w_act,
+        "actual_prev_hw_rate": "4.5700",
+        "actual_new_hw_rate": "4.9800",
+    }
+    if scls is not None:
+        row["scls_occupation_code"] = scls
+    return row
+
+
 def seed_demo_data(db: Any) -> None:
-    """Seed a deterministic NAICS 561720 demo organization and case if database is empty."""
+    """Seed the six canonical NAICS 561720 contracts when the database is empty."""
     if db.query(Organization).first() is not None:
         return
 
@@ -54,7 +108,7 @@ def seed_demo_data(db: Any) -> None:
 
     hunter = Agent1Hunter()
     old_wd_parsed = hunter.parse_wd_document(
-        raw_text="WD 2015-4281 Rev 26\n23470 - Janitor 16.50\nHEALTH & WELFARE: $4.98\nEO 13706: $4.57\n",
+        raw_text="WD 2015-4281 Rev 26\n23470 - Janitor 16.50\nHEALTH & WELFARE: $4.57\nEO 13706: $4.57\n",
         wd_number="2015-4281",
         revision_number=26,
         locality_state="VA",
@@ -62,189 +116,286 @@ def seed_demo_data(db: Any) -> None:
         source_published_at=date(2025, 6, 15),
     )
     new_wd_parsed = hunter.parse_wd_document(
-        raw_text="WD 2015-4281 Rev 27\n23470 - Janitor 18.20\nHEALTH & WELFARE: $5.36\nEO 13706: $4.98\n",
+        raw_text="WD 2015-4281 Rev 27\n23470 - Janitor 18.20\nHEALTH & WELFARE: $4.98\nEO 13706: $4.98\n",
         wd_number="2015-4281",
         revision_number=27,
         locality_state="VA",
         locality_county="Arlington",
         source_published_at=date(2026, 9, 15),
     )
-
-    old_wd = WageDetermination(
-        wd_number=old_wd_parsed.wd_number,
-        revision_number=old_wd_parsed.revision_number,
-        locality_state=old_wd_parsed.locality_state,
-        locality_county=old_wd_parsed.locality_county,
-        source_published_at=old_wd_parsed.source_published_at,
-        raw_content_hash=old_wd_parsed.raw_content_hash,
-        semantic_rate_hash=old_wd_parsed.semantic_rate_hash,
-        hw_rate_standard=old_wd_parsed.hw_rate_standard,
-        hw_rate_eo13706=old_wd_parsed.hw_rate_eo13706,
-        source_url="https://sam.gov/wage-determinations/2015-4281/26",
+    fmt_old_parsed = hunter.parse_wd_document(
+        raw_text="WD 2015-4281 Rev 26\n23470 - Janitor 16.50\nHEALTH & WELFARE: $4.57\nEO 13706: $4.57\n",
+        wd_number="2015-4281",
+        revision_number=26,
+        locality_state="MD",
+        locality_county="Prince George's",
+        source_published_at=date(2026, 8, 1),
     )
-    new_wd = WageDetermination(
-        wd_number=new_wd_parsed.wd_number,
-        revision_number=new_wd_parsed.revision_number,
-        locality_state=new_wd_parsed.locality_state,
-        locality_county=new_wd_parsed.locality_county,
-        source_published_at=new_wd_parsed.source_published_at,
-        raw_content_hash=new_wd_parsed.raw_content_hash,
-        semantic_rate_hash=new_wd_parsed.semantic_rate_hash,
-        hw_rate_standard=new_wd_parsed.hw_rate_standard,
-        hw_rate_eo13706=new_wd_parsed.hw_rate_eo13706,
-        source_url="https://sam.gov/wage-determinations/2015-4281/27",
+    fmt_new_parsed = hunter.parse_wd_document(
+        raw_text="   WD 2015-4281 Rev 26 (HTML REFORMAT)  \n  23470 - Janitor   16.50 \nHEALTH & WELFARE: $4.57\nEO 13706: $4.57\n",
+        wd_number="2015-4281",
+        revision_number=26,
+        locality_state="MD",
+        locality_county="Prince George's",
+        source_published_at=date(2026, 9, 1),
     )
-    db.add_all([old_wd, new_wd])
-    db.flush()
 
-    db.add_all([
-        WDOccupationRate(wd_id=old_wd.id, occupation_code="23470", occupation_title="Janitor", hourly_rate=Decimal("16.5000")),
-        WDOccupationRate(wd_id=new_wd.id, occupation_code="23470", occupation_title="Janitor", hourly_rate=Decimal("18.2000")),
-    ])
+    old_wd = _persist_wd(db, old_wd_parsed)
+    new_wd = _persist_wd(db, new_wd_parsed)
+    fmt_old = _persist_wd(db, fmt_old_parsed)
+    fmt_new = _persist_wd(db, fmt_new_parsed)
+    rate_diff = hunter.diff_wage_determinations(old_wd_parsed, new_wd_parsed)
+    format_diff = hunter.diff_wage_determinations(fmt_old_parsed, fmt_new_parsed)
+    quant = Agent2Quant()
+    scrubber = PrivacyScrubber()
+    sf30_parser = SF30Parser()
 
-    contract = Contract(
-        org_id=org.id,
+    def open_case(
+        *,
+        piid: str,
+        agency_name: str,
+        pop_state: str,
+        pop_county: str,
+        next_option: date,
+        old_parsed: Any,
+        new_parsed: Any,
+        old_row: WageDetermination,
+        new_row: WageDetermination,
+        wd_diff: Any,
+        payroll_rows: list[dict[str, Any]] | None,
+        sf30_text: str | None,
+        mod_number: str | None,
+        receipt: date | None,
+        lifecycle_override: str | None = None,
+    ) -> None:
+        contract = Contract(
+            org_id=org.id,
+            piid=piid,
+            agency_name=agency_name,
+            naics_code="561720",
+            psc_code="S201",
+            pop_state=pop_state,
+            pop_county=pop_county,
+            wd_number="2015-4281",
+            active_wd_id=new_row.id,
+            current_option_year=2,
+            next_option_start_date=next_option,
+        )
+        db.add(contract)
+        db.flush()
+
+        sf30_parsed = None
+        mod = None
+        if sf30_text and mod_number and receipt is not None:
+            sf30_parsed = sf30_parser.parse(
+                sf30_text=sf30_text,
+                effective_date=receipt,
+                verified_receipt_date=receipt,
+                explicit_mod_number=mod_number,
+            )
+            mod = ContractModification(
+                org_id=org.id,
+                contract_id=contract.id,
+                mod_number=sf30_parsed.mod_number,
+                mod_type=sf30_parsed.mod_type,
+                incorporated_wd_id=new_row.id,
+                effective_date=sf30_parsed.effective_date,
+                verified_receipt_date=sf30_parsed.verified_receipt_date,
+                notification_deadline_date=sf30_parsed.notification_deadline_date,
+                sf30_block14_text=sf30_text[:500],
+                document_hash=sf30_parsed.document_hash,
+            )
+            db.add(mod)
+            db.flush()
+
+        payroll_lines = None
+        if payroll_rows is not None:
+            payroll_lines, _, _ = scrubber.scrub_payroll_rows(raw_rows=payroll_rows, org_id=org.id)
+
+        eval_res = quant.evaluate_case(
+            contract_wd_number="2015-4281",
+            contract_next_option_date=contract.next_option_start_date,
+            is_eo13706_applicable=True,
+            has_complex_cba=False,
+            old_wd=old_parsed,
+            new_wd=new_parsed,
+            wd_diff=wd_diff,
+            sf30_mod=sf30_parsed,
+            payroll_lines=payroll_lines,
+            tax_config=StatutoryTaxConfig(),
+            evaluation_date=EVAL_DATE,
+        )
+        adj_case = AdjustmentCase(
+            org_id=org.id,
+            contract_id=contract.id,
+            modification_id=mod.id if mod else None,
+            old_wd_id=old_row.id,
+            new_wd_id=new_row.id,
+            state_gate=eval_res.state_gate.value,
+            lifecycle_status=lifecycle_override or eval_res.lifecycle_status.value,
+            is_pre_option_alert=eval_res.is_pre_option_alert,
+            days_until_option=eval_res.days_until_option,
+            days_remaining_30d_clock=eval_res.days_remaining_30d_clock,
+            is_late_notice_flagged=eval_res.is_late_notice_flagged,
+            total_eligible_hours=eval_res.total_eligible_hours,
+            total_eligible_wage_delta=eval_res.total_eligible_wage_delta,
+            total_eligible_hw_delta=eval_res.total_eligible_hw_delta,
+            total_accompanying_taxes_wc=eval_res.total_accompanying_taxes_wc,
+            voluntary_raise_excluded_amount=eval_res.voluntary_raise_excluded_amount,
+            total_claim_amount=eval_res.total_claim_amount,
+            gate_reason=eval_res.gate_reason,
+        )
+        db.add(adj_case)
+        db.flush()
+        for l_row in eval_res.ledger_lines:
+            db.add(
+                CalculationLedgerEntry(
+                    org_id=org.id,
+                    case_id=adj_case.id,
+                    scls_occupation_code=l_row.scls_occupation_code,
+                    worker_hash=l_row.worker_hash,
+                    eligible_wage_hours=l_row.eligible_wage_hours,
+                    eligible_hw_hours=l_row.eligible_hw_hours,
+                    overtime_hours_excluded_from_hw=l_row.overtime_hours_excluded_from_hw,
+                    w_prev=l_row.w_prev,
+                    w_req_new=l_row.w_req_new,
+                    w_act_new=l_row.w_act_new,
+                    eligible_hourly_wage_delta=l_row.eligible_hourly_wage_delta,
+                    voluntary_hourly_exclusion=l_row.voluntary_hourly_exclusion,
+                    hw_prev=l_row.hw_prev,
+                    hw_req_new=l_row.hw_req_new,
+                    hw_act_new=l_row.hw_act_new,
+                    eligible_hourly_hw_delta=l_row.eligible_hourly_hw_delta,
+                    combined_tax_wc_rate=l_row.combined_tax_wc_rate,
+                    tax_wc_hourly_delta=l_row.tax_wc_hourly_delta,
+                    line_wage_entitlement=l_row.line_wage_entitlement,
+                    line_hw_entitlement=l_row.line_hw_entitlement,
+                    line_tax_wc_entitlement=l_row.line_tax_wc_entitlement,
+                    line_total_claim=l_row.line_total_claim,
+                )
+            )
+        for sp in eval_res.evidence_spans:
+            db.add(
+                EvidenceSpan(
+                    org_id=org.id,
+                    case_id=adj_case.id,
+                    source_doc_type=sp.source_doc_type,
+                    source_doc_identifier=sp.source_doc_identifier,
+                    extracted_field_name=sp.extracted_field_name,
+                    extracted_value=sp.extracted_value,
+                    page_number=sp.page_number,
+                    char_start=sp.char_start,
+                    char_end=sp.char_end,
+                    verbatim_quote=sp.verbatim_quote,
+                    confidence_score=sp.confidence_score,
+                )
+            )
+
+    option_sf30 = (
+        "MODIFICATION {mod}: Pursuant to FAR 52.217-9 and FAR 52.222-43, "
+        "the Government hereby exercises Option Period 2 and incorporates WD 2015-4281 Rev 27."
+    )
+    open_case(
         piid="47PM0924C0012",
-        agency_name="General Services Administration (GSA PBS Region 11)",
-        naics_code="561720",
-        psc_code="S201",
+        agency_name="GSA Public Buildings Service (Region 11 - Arlington, VA)",
         pop_state="VA",
         pop_county="Arlington",
-        wd_number="2015-4281",
-        active_wd_id=new_wd.id,
-        current_option_year=2,
-        next_option_start_date=date(2027, 10, 1),
-    )
-    db.add(contract)
-    db.flush()
-
-    sf30_parser = SF30Parser()
-    sf30_parsed = sf30_parser.parse(
-        sf30_text="MODIFICATION P00004: Pursuant to FAR 52.217-9 and FAR 52.222-43, the Government hereby exercises Option Period 2 and incorporates WD 2015-4281 Rev 27.",
-        effective_date=date(2026, 10, 1),
-        verified_receipt_date=date(2026, 10, 10),
-        explicit_mod_number="P00004",
-    )
-
-    mod = ContractModification(
-        org_id=org.id,
-        contract_id=contract.id,
-        mod_number=sf30_parsed.mod_number,
-        mod_type=sf30_parsed.mod_type,
-        incorporated_wd_id=new_wd.id,
-        effective_date=sf30_parsed.effective_date,
-        verified_receipt_date=sf30_parsed.verified_receipt_date,
-        notification_deadline_date=sf30_parsed.notification_deadline_date,
-        sf30_block14_text="Exercise Option Period 2 and incorporate WD 2015-4281 Rev 27.",
-        document_hash=sf30_parsed.document_hash,
-    )
-    db.add(mod)
-    db.flush()
-
-    scrubber = PrivacyScrubber()
-    scrubbed_lines, _, _ = scrubber.scrub_payroll_rows(
-        raw_rows=[
-            {
-                "employee_name": "Marcus Vance",
-                "ssn": "123-45-6789",
-                "internal_job_code": "JAN-1",
-                "scls_occupation_code": "23470",
-                "regular_hours": "2080.0000",
-                "overtime_hours": "0.0000",
-                "vacation_holiday_hours": "0.0000",
-                "actual_prev_wage_rate": "16.5000",
-                "actual_new_wage_rate": "19.0000",
-                "actual_prev_hw_rate": "4.5700",
-                "actual_new_hw_rate": "4.9800",
-            }
+        next_option=date(2027, 10, 1),
+        old_parsed=old_wd_parsed,
+        new_parsed=new_wd_parsed,
+        old_row=old_wd,
+        new_row=new_wd,
+        wd_diff=rate_diff,
+        payroll_rows=[
+            _payroll_row("COHORT-1", "20800.0000", "0.0000", "19.0000", "JAN-1"),
+            _payroll_row("COHORT-2", "20800.0000", "0.0000", "19.0000", "JAN-2"),
         ],
-        org_id=org.id,
+        sf30_text=option_sf30.format(mod="P00004"),
+        mod_number="P00004",
+        receipt=date(2026, 10, 10),
+        lifecycle_override="SUPPORTED",
     )
-
-    diff = hunter.diff_wage_determinations(old_wd_parsed, new_wd_parsed)
-    quant = Agent2Quant()
-    eval_res = quant.evaluate_case(
-        contract_wd_number="2015-4281",
-        contract_next_option_date=contract.next_option_start_date,
-        is_eo13706_applicable=True,
-        has_complex_cba=False,
-        old_wd=old_wd_parsed,
-        new_wd=new_wd_parsed,
-        wd_diff=diff,
-        sf30_mod=sf30_parsed,
-        payroll_lines=scrubbed_lines,
-        tax_config=StatutoryTaxConfig(),
-        evaluation_date=date(2026, 10, 30),
+    open_case(
+        piid="W912DR24C0045",
+        agency_name="U.S. Army Corps of Engineers (Baltimore District, MD)",
+        pop_state="MD",
+        pop_county="Baltimore",
+        next_option=date(2027, 10, 1),
+        old_parsed=old_wd_parsed,
+        new_parsed=new_wd_parsed,
+        old_row=old_wd,
+        new_row=new_wd,
+        wd_diff=rate_diff,
+        payroll_rows=[_payroll_row("COHORT-OT", "20800.0000", "200.0000", "18.4400", "JAN-OT")],
+        sf30_text=option_sf30.format(mod="P00003"),
+        mod_number="P00003",
+        receipt=date(2026, 10, 16),
+        lifecycle_override="SUBMITTED",
     )
-
-    adj_case = AdjustmentCase(
-        org_id=org.id,
-        contract_id=contract.id,
-        modification_id=mod.id,
-        old_wd_id=old_wd.id,
-        new_wd_id=new_wd.id,
-        state_gate=eval_res.state_gate.value,
-        lifecycle_status=eval_res.lifecycle_status.value,
-        is_pre_option_alert=eval_res.is_pre_option_alert,
-        days_until_option=eval_res.days_until_option,
-        days_remaining_30d_clock=eval_res.days_remaining_30d_clock,
-        is_late_notice_flagged=eval_res.is_late_notice_flagged,
-        total_eligible_hours=eval_res.total_eligible_hours,
-        total_eligible_wage_delta=eval_res.total_eligible_wage_delta,
-        total_eligible_hw_delta=eval_res.total_eligible_hw_delta,
-        total_accompanying_taxes_wc=eval_res.total_accompanying_taxes_wc,
-        voluntary_raise_excluded_amount=eval_res.voluntary_raise_excluded_amount,
-        total_claim_amount=eval_res.total_claim_amount,
-        gate_reason=eval_res.gate_reason,
+    open_case(
+        piid="GS03P24CD0019",
+        agency_name="GSA Public Buildings Service (Montgomery County, MD)",
+        pop_state="MD",
+        pop_county="Montgomery",
+        next_option=date(2027, 1, 13),
+        old_parsed=old_wd_parsed,
+        new_parsed=new_wd_parsed,
+        old_row=old_wd,
+        new_row=new_wd,
+        wd_diff=rate_diff,
+        payroll_rows=None,
+        sf30_text=None,
+        mod_number=None,
+        receipt=None,
     )
-    db.add(adj_case)
-    db.flush()
-
-    for l_row in eval_res.ledger_lines:
-        db.add(
-            CalculationLedgerEntry(
-                org_id=org.id,
-                case_id=adj_case.id,
-                scls_occupation_code=l_row.scls_occupation_code,
-                worker_hash=l_row.worker_hash,
-                eligible_wage_hours=l_row.eligible_wage_hours,
-                eligible_hw_hours=l_row.eligible_hw_hours,
-                overtime_hours_excluded_from_hw=l_row.overtime_hours_excluded_from_hw,
-                w_prev=l_row.w_prev,
-                w_req_new=l_row.w_req_new,
-                w_act_new=l_row.w_act_new,
-                eligible_hourly_wage_delta=l_row.eligible_hourly_wage_delta,
-                voluntary_hourly_exclusion=l_row.voluntary_hourly_exclusion,
-                hw_prev=l_row.hw_prev,
-                hw_req_new=l_row.hw_req_new,
-                hw_act_new=l_row.hw_act_new,
-                eligible_hourly_hw_delta=l_row.eligible_hourly_hw_delta,
-                combined_tax_wc_rate=l_row.combined_tax_wc_rate,
-                tax_wc_hourly_delta=l_row.tax_wc_hourly_delta,
-                line_wage_entitlement=l_row.line_wage_entitlement,
-                line_hw_entitlement=l_row.line_hw_entitlement,
-                line_tax_wc_entitlement=l_row.line_tax_wc_entitlement,
-                line_total_claim=l_row.line_total_claim,
-            )
-        )
-
-    for sp in eval_res.evidence_spans:
-        db.add(
-            EvidenceSpan(
-                org_id=org.id,
-                case_id=adj_case.id,
-                source_doc_type=sp.source_doc_type,
-                source_doc_identifier=sp.source_doc_identifier,
-                extracted_field_name=sp.extracted_field_name,
-                extracted_value=sp.extracted_value,
-                page_number=sp.page_number,
-                char_start=sp.char_start,
-                char_end=sp.char_end,
-                verbatim_quote=sp.verbatim_quote,
-                confidence_score=sp.confidence_score,
-            )
-        )
-
+    open_case(
+        piid="36C24524C0118",
+        agency_name="Department of Veterans Affairs (VISN 5 Medical Center)",
+        pop_state="MD",
+        pop_county="Baltimore",
+        next_option=date(2027, 1, 2),
+        old_parsed=old_wd_parsed,
+        new_parsed=new_wd_parsed,
+        old_row=old_wd,
+        new_row=new_wd,
+        wd_diff=rate_diff,
+        payroll_rows=None,
+        sf30_text=None,
+        mod_number=None,
+        receipt=None,
+    )
+    open_case(
+        piid="FA890324C0008",
+        agency_name="Department of the Air Force (772 ESS Facility Services)",
+        pop_state="MD",
+        pop_county="Anne Arundel",
+        next_option=date(2027, 10, 1),
+        old_parsed=old_wd_parsed,
+        new_parsed=new_wd_parsed,
+        old_row=old_wd,
+        new_row=new_wd,
+        wd_diff=rate_diff,
+        payroll_rows=[_payroll_row("UNMAPPED-JOB", "2080.0000", "0.0000", "18.2000", "CUST-LD-99", None)],
+        sf30_text="MODIFICATION P00002 incorporates WD 2015-4281 Rev 27.",
+        mod_number="P00002",
+        receipt=date(2026, 10, 18),
+    )
+    open_case(
+        piid="70B06C24C00000042",
+        agency_name="Department of Homeland Security (CBP Training Facility)",
+        pop_state="MD",
+        pop_county="Prince George's",
+        next_option=date(2027, 6, 1),
+        old_parsed=fmt_old_parsed,
+        new_parsed=fmt_new_parsed,
+        old_row=fmt_old,
+        new_row=fmt_new,
+        wd_diff=format_diff,
+        payroll_rows=None,
+        sf30_text=None,
+        mod_number=None,
+        receipt=None,
+    )
     db.commit()
 
 
@@ -253,6 +404,12 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         seed_demo_data(db)
+
+
+@app.get("/command-center", response_class=HTMLResponse)
+def command_center() -> HTMLResponse:
+    index_path = pathlib.Path(__file__).resolve().parents[1] / "index.html"
+    return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
 @app.get("/api/health")
