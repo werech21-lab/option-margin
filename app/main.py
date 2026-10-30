@@ -1,11 +1,13 @@
 """FastAPI Entrypoint, HTMX Views, and REST API Endpoints for OptionMargin."""
 
+import html
 import json
+import os
 import pathlib
 from datetime import date
 from decimal import Decimal
 from fastapi import FastAPI, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from typing import Any
 from app.config import q2, q4, settings
@@ -697,3 +699,312 @@ def list_outbox(db: Any = Depends(get_db)) -> dict:
             }
         )
     return {"count": len(items), "records": items}
+
+
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://optionmargin-engine.onrender.com").rstrip("/")
+
+WAGE_DETERMINATIONS: dict[str, dict[str, str]] = {
+    "2015-4281": {
+        "locality": "Arlington, VA and Washington, DC",
+        "old_revision": "26",
+        "new_revision": "27",
+        "old_wage": "16.50",
+        "new_wage": "18.20",
+        "alt_wage": "DC floor moves from $17.10 to $18.95",
+        "old_hw": "4.57",
+        "new_hw": "4.98",
+    },
+    "2015-4265": {
+        "locality": "Baltimore, MD",
+        "old_revision": "24",
+        "new_revision": "25",
+        "old_wage": "16.50",
+        "new_wage": "18.20",
+        "alt_wage": "Maryland janitorial schedule",
+        "old_hw": "4.57",
+        "new_hw": "4.98",
+    },
+    "2015-5253": {
+        "locality": "Texas statewide janitorial locality",
+        "old_revision": "22",
+        "new_revision": "23",
+        "old_wage": "14.80",
+        "new_wage": "16.40",
+        "alt_wage": "Texas wage floor",
+        "old_hw": "4.57",
+        "new_hw": "4.98",
+    },
+    "2015-5637": {
+        "locality": "California statewide janitorial locality",
+        "old_revision": "25",
+        "new_revision": "26",
+        "old_wage": "18.10",
+        "new_wage": "19.90",
+        "alt_wage": "California wage floor",
+        "old_hw": "4.57",
+        "new_hw": "4.98",
+    },
+}
+
+
+def _money(value: Decimal | str) -> str:
+    return f"{Decimal(str(value)):,.2f}"
+
+
+def _commercial_page(title: str, body: str) -> HTMLResponse:
+    safe_title = html.escape(title)
+    document = f"""<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{safe_title}</title>
+    <meta name="description" content="OptionMargin prices the mandatory FAR 52.222-43 Service Contract Act adjustment for NAICS 561720 janitorial contracts. Overhead, G&amp;A, and profit stay at $0.00.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="min-h-full font-sans antialiased">
+    <nav class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-30">
+        <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+            <a href="/" class="text-lg font-bold text-white">OptionMargin</a>
+            <div class="flex gap-4 text-sm">
+                <a href="/calculator" class="text-slate-300 hover:text-white">Calculator</a>
+                <a href="/wd/2015-4281" class="text-slate-300 hover:text-white">Wage Determinations</a>
+                <a href="/command-center" class="text-emerald-400">Command Center</a>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-5xl mx-auto px-4 py-10">{body}</main>
+</body>
+</html>"""
+    return HTMLResponse(document)
+
+
+def _teaser_for_claim(contract_piid: str, uei: str, db: Any):
+    stored = None
+    rows = db.query(TransactionalOutbox).filter(TransactionalOutbox.task_type == "prospect_audit").all()
+    for row in rows:
+        try:
+            payload = json.loads(row.payload_json)
+        except (TypeError, ValueError):
+            continue
+        if payload.get("contract_piid") == contract_piid:
+            stored = payload
+            break
+    fte = 30 if contract_piid == "47PM0924C0088" else 20
+    state = "MD" if contract_piid.startswith("W912") else "VA"
+    wd = WAGE_DETERMINATIONS["2015-4265" if state == "MD" else "2015-4281"]
+    teaser = SampleGenerator().build_prospect_audit(
+        prospect_company_name=(stored or {}).get("prospect_company_name") or "Federal Janitorial Contractor",
+        prospect_uei=uei or "PENDING-UEI",
+        contract_piid=contract_piid,
+        agency_name="General Services Administration" if state == "VA" else "U.S. Army Corps of Engineers",
+        locality=wd["locality"],
+        wd_number="2015-4265" if state == "MD" else "2015-4281",
+        old_revision=int(wd["old_revision"]),
+        new_revision=int(wd["new_revision"]),
+        next_option_date=date(2027, 1, 3),
+        old_wd_rate=Decimal(wd["old_wage"]),
+        new_wd_rate=Decimal(wd["new_wage"]),
+        old_hw_rate=Decimal(wd["old_hw"]),
+        new_hw_rate=Decimal(wd["new_hw"]),
+        estimated_janitor_fte=fte,
+        as_of_date=date(2026, 10, 30),
+    )
+    if stored and stored.get("estimated_recovery_usd"):
+        return teaser, Decimal(stored["estimated_recovery_usd"])
+    return teaser, teaser.estimated_annual_recovery_usd
+
+
+@app.get("/claim-audit/{contract_piid}", response_class=HTMLResponse)
+def claim_audit_page(contract_piid: str, uei: str = "PENDING-UEI", db: Any = Depends(get_db)) -> HTMLResponse:
+    teaser, recovery = _teaser_for_claim(contract_piid, uei, db)
+    checkout = StripeBillingService().create_checkout_session(
+        contract_piid=contract_piid,
+        prospect_uei=uei,
+        estimated_recovery_usd=recovery,
+        plan_code="SINGLE_CLAIM_UNLOCK",
+    )
+    preview = html.escape(teaser.redacted_evidence_preview)
+    body = f"""
+    <p class="text-xs uppercase tracking-wider text-amber-300">Watermarked prospect audit · SF-30 still redacted</p>
+    <h1 class="mt-3 text-3xl font-bold text-white">FAR 52.222-43 margin recovery audit for {html.escape(contract_piid)}</h1>
+    <p class="mt-3 text-slate-300">UEI {html.escape(uei)} · {html.escape(teaser.agency_name)} · {html.escape(teaser.locality)}</p>
+    <div class="mt-8 grid md:grid-cols-3 gap-4">
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">Estimated annual recovery</div>
+            <div class="mt-2 text-3xl font-bold text-emerald-400">${_money(recovery)}</div>
+            <div class="mt-2 text-sm text-slate-400">Published wedge for this occupation: $97,323.20 – $145,984.80</div>
+        </div>
+        <div class="p-5 rounded-xl bg-slate-900 border border-rose-900/60">
+            <div class="text-xs text-rose-300">FAR 52.222-43(f) clock</div>
+            <div class="mt-2 text-xl font-bold text-white">30 calendar days from verified SF-30 receipt</div>
+            <div class="mt-2 text-sm text-slate-400">{teaser.days_until_option} days remain before the next option date ({teaser.next_option_date.isoformat()}). A late notice can forfeit the adjustment.</div>
+        </div>
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">Price of the unredacted package</div>
+            <div class="mt-2 text-3xl font-bold text-white">$1,499.00</div>
+            <div class="mt-2 text-sm text-slate-400">6,400% ROI against a $97,323.20 claim. OH / G&amp;A / Profit stay $0.00.</div>
+        </div>
+    </div>
+    <section class="mt-8 p-6 rounded-xl bg-slate-900 border border-slate-800">
+        <h2 class="text-lg font-semibold text-white">Redacted SF-30 and evidence span</h2>
+        <p class="mt-3 text-sm leading-6 text-slate-300">{preview}</p>
+        <p class="mt-4 text-sm text-slate-500">Worker names, SSNs, and the contracting officer's block are removed until the package is unlocked.</p>
+    </section>
+    <a href="{html.escape(checkout.checkout_url)}" class="mt-8 inline-flex px-6 py-4 rounded-lg bg-emerald-500 text-slate-950 font-bold text-lg">Unlock Unredacted Evidence Package &amp; CO Claim Letter ($1,499 — 6,400% ROI)</a>
+    """
+    return _commercial_page(f"Claim audit {contract_piid}", body)
+
+
+@app.get("/checkout/{session_id}", response_class=HTMLResponse)
+def checkout_portal(
+    session_id: str,
+    piid: str = "47PM0924C0012",
+    uei: str = "PENDING-UEI",
+    plan: str = "SINGLE_CLAIM_UNLOCK",
+    amount: str = "1499.00",
+    recovery: str = "97323.20",
+) -> HTMLResponse:
+    fee = _money(amount)
+    body = f"""
+    <p class="text-xs uppercase tracking-wider text-emerald-300">Corporate checkout and invoice reservation</p>
+    <h1 class="mt-3 text-3xl font-bold text-white">Authorize the ${fee} claim package</h1>
+    <p class="mt-3 text-slate-300">Contract {html.escape(piid)} · UEI {html.escape(uei)} · Plan {html.escape(plan)} · Estimated recovery ${_money(recovery)}</p>
+    <form method="post" action="/api/billing/capture-order" class="mt-8 grid md:grid-cols-2 gap-4 p-6 rounded-xl bg-slate-900 border border-slate-800">
+        <input type="hidden" name="session_id" value="{html.escape(session_id)}">
+        <input type="hidden" name="contract_piid" value="{html.escape(piid)}">
+        <input type="hidden" name="prospect_uei" value="{html.escape(uei)}">
+        <input type="hidden" name="plan_code" value="{html.escape(plan)}">
+        <input type="hidden" name="amount" value="{html.escape(amount)}">
+        <input type="hidden" name="recovery" value="{html.escape(recovery)}">
+        <label class="text-sm text-slate-300">Company name<input required name="company_name" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+        <label class="text-sm text-slate-300">CFO / contracts manager<input required name="contact_name" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+        <label class="text-sm text-slate-300">Official email<input required type="email" name="email" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+        <label class="text-sm text-slate-300">Phone<input required name="phone" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+        <label class="md:col-span-2 text-sm text-slate-300">SF-30 modification status
+            <select name="sf30_status" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white">
+                <option>Not yet received</option>
+                <option>Received — 30-day clock running</option>
+                <option>Incorporated in the contract</option>
+            </select>
+        </label>
+        <button class="md:col-span-2 py-3 rounded-lg bg-emerald-500 text-slate-950 font-bold" type="submit">Authorize ${fee} Claim Package Unlock</button>
+    </form>
+    <p class="mt-4 text-xs text-slate-500">Card checkout runs through Stripe when a secret key is configured. Otherwise this reservation is captured for ACH or corporate invoice. Session {html.escape(session_id)}.</p>
+    """
+    return _commercial_page(f"Checkout {session_id}", body)
+
+
+@app.post("/api/billing/capture-order")
+def capture_order(
+    session_id: str = Form(...),
+    contract_piid: str = Form(...),
+    prospect_uei: str = Form(...),
+    plan_code: str = Form("SINGLE_CLAIM_UNLOCK"),
+    amount: str = Form("1499.00"),
+    recovery: str = Form("0.00"),
+    company_name: str = Form(...),
+    contact_name: str = Form(...),
+    email: str = Form(...),
+    phone: str = Form(...),
+    sf30_status: str = Form("Not yet received"),
+    db: Any = Depends(get_db),
+) -> RedirectResponse:
+    payload = {
+        "order_status": "ORDER_CAPTURED",
+        "session_id": session_id,
+        "contract_piid": contract_piid,
+        "prospect_uei": prospect_uei,
+        "plan_code": plan_code,
+        "amount": amount,
+        "recovery": recovery,
+        "company_name": company_name,
+        "contact_name": contact_name,
+        "email": email,
+        "phone": phone,
+        "sf30_status": sf30_status,
+    }
+    subject = f"[OptionMargin Order] {company_name} authorized ${amount} for {contract_piid}"
+    html_body = (
+        f"<p>{html.escape(company_name)} ({html.escape(contact_name)}) reserved a "
+        f"${html.escape(amount)} unlock for {html.escape(contract_piid)}.</p>"
+        f"<p>Email {html.escape(email)} · Phone {html.escape(phone)} · SF-30: {html.escape(sf30_status)}</p>"
+    )
+    channel, status = OutboundEmailDispatcher._send_if_configured(
+        "werech21@gmail.com",
+        subject,
+        html_body,
+        f"{company_name} authorized ${amount} for {contract_piid}. Contact {contact_name} {email} {phone}.",
+    )
+    payload["delivery_channel"] = channel
+    payload["delivery_status"] = status
+    record, _created = Agent3Executor().enqueue_outbox_task(
+        db,
+        org_id=None,
+        idempotency_key=f"ORDER-{session_id}",
+        task_type="billing_sync",
+        payload=payload,
+    )
+    record.status = "ORDER_CAPTURED"
+    record.result_summary = "ORDER_CAPTURED"
+    db.commit()
+    return RedirectResponse(url=f"/command-center?unlocked={contract_piid}", status_code=303)
+
+
+@app.get("/wd/{wd_number}", response_class=HTMLResponse)
+def wage_determination_page(wd_number: str) -> HTMLResponse:
+    page = WAGE_DETERMINATIONS.get(wd_number)
+    if page is None:
+        listed = ", ".join(WAGE_DETERMINATIONS)
+        return _commercial_page("Wage determination not found", f"<h1 class='text-2xl font-bold'>WD {html.escape(wd_number)} is not in the public index.</h1><p class='mt-3 text-slate-300'>Indexed determinations: {html.escape(listed)}</p>")
+    body = f"""
+    <p class="text-xs uppercase tracking-wider text-sky-300">Programmatic wage determination · NAICS 561720</p>
+    <h1 class="mt-3 text-3xl font-bold text-white">WD {html.escape(wd_number)} · 23470 Janitor</h1>
+    <p class="mt-3 text-slate-300">{html.escape(page['locality'])}. {html.escape(page['alt_wage'])}.</p>
+    <div class="mt-8 overflow-hidden rounded-xl border border-slate-800">
+        <table class="w-full text-sm">
+            <thead class="bg-slate-900 text-slate-400"><tr><th class="text-left p-3">Revision</th><th class="text-left p-3">Wage</th><th class="text-left p-3">Health &amp; Welfare</th></tr></thead>
+            <tbody>
+                <tr class="border-t border-slate-800"><td class="p-3">Rev {html.escape(page['old_revision'])}</td><td class="p-3">${html.escape(page['old_wage'])}</td><td class="p-3">${html.escape(page['old_hw'])}</td></tr>
+                <tr class="border-t border-slate-800"><td class="p-3">Rev {html.escape(page['new_revision'])}</td><td class="p-3 text-emerald-400">${html.escape(page['new_wage'])}</td><td class="p-3 text-emerald-400">${html.escape(page['new_hw'])}</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <section class="mt-8 p-6 rounded-xl bg-slate-900 border border-slate-800">
+        <h2 class="text-lg font-semibold">SCLS margin bleed calculator</h2>
+        <form hx-post="/api/calculator" hx-target="#wd-calc" hx-swap="innerHTML" class="mt-4 grid md:grid-cols-3 gap-3">
+            <input type="hidden" name="contract_piid" value="WD-{html.escape(wd_number)}">
+            <label class="text-xs text-slate-400">Janitor FTE<input name="worker_count" value="20" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">Hours / FTE<input name="annual_hours_per_worker" value="2080" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">W prev<input name="w_prev" value="{html.escape(page['old_wage'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">W required<input name="w_req_new" value="{html.escape(page['new_wage'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">W paid<input name="w_act_new" value="{html.escape(page['new_wage'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">H&amp;W prev<input name="hw_prev" value="{html.escape(page['old_hw'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">H&amp;W required<input name="hw_req_new" value="{html.escape(page['new_hw'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <label class="text-xs text-slate-400">H&amp;W paid<input name="hw_act_new" value="{html.escape(page['new_hw'])}" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-white"></label>
+            <button class="md:col-span-3 py-3 rounded-lg bg-emerald-600 text-white font-semibold" type="submit">Calculate this wage determination</button>
+        </form>
+        <div id="wd-calc" class="mt-4 text-sm text-slate-300"></div>
+    </section>
+    """
+    return _commercial_page(f"WD {wd_number} Janitor rates", body)
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+    paths = ["/", "/calculator", "/command-center", "/claim-audit/47PM0924C0088", "/claim-audit/47PM0924C0012"]
+    paths.extend(f"/wd/{number}" for number in WAGE_DETERMINATIONS)
+    urls = "\n".join(f"  <url><loc>{PUBLIC_BASE_URL}{path}</loc></url>" for path in paths)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{urls}\n</urlset>\n"
+    )
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.get("/robots.txt")
+def robots() -> Response:
+    body = f"User-agent: *\nAllow: /\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    return Response(content=body, media_type="text/plain")
