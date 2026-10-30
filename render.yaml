@@ -1,3 +1,11 @@
+databases:
+  - name: optionmargin-db
+    databaseName: optionmargin
+    user: optionmargin
+    plan: free
+    region: oregon
+    ipAllowList: []
+
 services:
   - type: web
     name: optionmargin-engine
@@ -10,7 +18,11 @@ services:
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        value: sqlite:///./option_margin.db
+        fromDatabase:
+          name: optionmargin-db
+          property: connectionString
+      - key: PUBLIC_BASE_URL
+        value: https://optionmargin-engine.onrender.com
       - key: PII_HMAC_SECRET
         generateValue: true
       - key: STRIPE_SECRET_KEY
@@ -23,4 +35,11 @@ services:
     runtime: python
     schedule: "0 11 * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python -c "from app.main import create_prospect_audit; print(create_prospect_audit())"
+    startCommand: python -c "from app.database import init_db, SessionLocal; from app.main import run_live_sniper_pipeline; init_db(); db = SessionLocal(); print(run_live_sniper_pipeline(limit=5, recipient_email='werech21@gmail.com', db=db))"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: optionmargin-db
+          property: connectionString
+      - key: PUBLIC_BASE_URL
+        value: https://optionmargin-engine.onrender.com

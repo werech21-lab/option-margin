@@ -15,8 +15,18 @@ try:
     from sqlalchemy.orm import declarative_base, sessionmaker, Session  # type: ignore
 
     HAS_SQLALCHEMY = True
-    connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-    engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
+
+    def _normalize_database_url(url: str) -> str:
+        """Accept Render's postgres:// URLs and pin the psycopg2 driver."""
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg2://" + url[len("postgres://") :]
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg2://" + url[len("postgresql://") :]
+        return url
+
+    _database_url = _normalize_database_url(settings.database_url)
+    connect_args = {"check_same_thread": False} if _database_url.startswith("sqlite") else {}
+    engine = create_engine(_database_url, connect_args=connect_args, future=True)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     Base = declarative_base()
 

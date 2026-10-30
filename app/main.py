@@ -1,5 +1,6 @@
 """FastAPI Entrypoint, HTMX Views, and REST API Endpoints for OptionMargin."""
 
+import json
 import pathlib
 from datetime import date
 from decimal import Decimal
@@ -16,6 +17,7 @@ from app.models import (
     ContractModification,
     EvidenceSpan,
     Organization,
+    TransactionalOutbox,
     WageDetermination,
     WDOccupationRate,
 )
@@ -26,7 +28,9 @@ from app.agents.agent3_executor import Agent3Executor
 from app.services.privacy_scrubber import PrivacyScrubber
 from app.services.sf30_parser import SF30Parser
 from app.services.sample_generator import SampleGenerator
+from app.services.email_dispatcher import OutboundEmailDispatcher
 from app.services.stripe_billing import StripeBillingService
+from app.services.usaspending_live import USAspendingLiveService
 
 app = FastAPI(
     title=settings.app_name,
@@ -620,3 +624,76 @@ def create_stripe_checkout(
         "checkout_url": session.checkout_url,
         "mode": session.mode,
     }
+
+
+def run_live_sniper_pipeline(
+    limit: int = 5,
+    recipient_email: str = "werech21@gmail.com",
+    db: Any = None,
+) -> dict:
+    """Pull live NAICS 561720 awards, price each teaser, and queue idempotent outbox emails."""
+    owns_session = db is None
+    if db is None:
+        db = SessionLocal()
+    try:
+        teasers = USAspendingLiveService().generate_live_prospect_audits(limit=limit)
+        dispatcher = OutboundEmailDispatcher()
+        executor = Agent3Executor()
+        records: list[dict[str, Any]] = []
+        for teaser in teasers:
+            email = dispatcher.build_audit_email(teaser, recipient_email=recipient_email)
+            payload = {
+                "idempotency_key": email.idempotency_key,
+                "recipient_email": email.recipient_email,
+                "subject": email.subject,
+                "contract_piid": email.contract_piid,
+                "prospect_company_name": teaser.prospect_company_name,
+                "estimated_recovery_usd": email.estimated_recovery_usd,
+                "stripe_checkout_url": email.stripe_checkout_url,
+                "charge_amount_usd": "1499.00",
+                "delivery_channel": email.delivery_channel,
+                "delivery_status": email.delivery_status,
+                "days_until_option": teaser.days_until_option,
+            }
+            record, created = executor.enqueue_outbox_task(
+                db,
+                org_id=None,
+                idempotency_key=email.idempotency_key,
+                task_type="prospect_audit",
+                payload=payload,
+            )
+            records.append({**payload, "outbox_id": record.id, "created": created, "status": record.status})
+        return {"count": len(records), "recipient_email": recipient_email, "records": records}
+    finally:
+        if owns_session:
+            db.close()
+
+
+@app.post("/api/sniper/run-live")
+def run_live_sniper_endpoint(
+    limit: int = 5,
+    recipient_email: str = "werech21@gmail.com",
+    db: Any = Depends(get_db),
+) -> dict:
+    return run_live_sniper_pipeline(limit=limit, recipient_email=recipient_email, db=db)
+
+
+@app.get("/api/outbox")
+def list_outbox(db: Any = Depends(get_db)) -> dict:
+    rows = db.query(TransactionalOutbox).filter(TransactionalOutbox.task_type == "prospect_audit").all()
+    items = []
+    for row in rows:
+        try:
+            payload = json.loads(row.payload_json)
+        except (TypeError, ValueError):
+            payload = {"raw": row.payload_json}
+        items.append(
+            {
+                "id": row.id,
+                "idempotency_key": row.idempotency_key,
+                "task_type": row.task_type,
+                "status": row.status,
+                "payload": payload,
+            }
+        )
+    return {"count": len(items), "records": items}
