@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="/" class="text-xs text-slate-400 hover:text-white">&larr; Back to Dashboard</a>
+            <h1 class="mt-1 text-2xl font-bold text-white">Case Audit Trail: {{ case.piid }}</h1>
+            <p class="text-sm text-slate-400">{{ case.gate_reason }}</p>
+        </div>
+        <div class="text-right">
+            <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                {{ case.state_gate }} • {{ case.lifecycle_status }}
+            </span>
+            <div class="mt-2 text-2xl font-mono font-bold text-emerald-400">${{ case.total_claim_amount }}</div>
+        </div>
+    </div>
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 p-6">
+        <h2 class="text-base font-semibold text-white mb-4">Deterministic Worker-Hash Calculation Ledger</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs font-mono">
+                <thead>
+                    <tr class="border-b border-slate-800 text-slate-400">
+                        <th class="py-2 px-3">Worker Hash</th>
+                        <th class="py-2 px-3">Occ</th>
+                        <th class="py-2 px-3 text-right">Wage Hrs</th>
+                        <th class="py-2 px-3 text-right">H&W Hrs</th>
+                        <th class="py-2 px-3 text-right">W_prev</th>
+                        <th class="py-2 px-3 text-right">W_req</th>
+                        <th class="py-2 px-3 text-right">W_act</th>
+                        <th class="py-2 px-3 text-right">Elig dW</th>
+                        <th class="py-2 px-3 text-right">Vol Excl</th>
+                        <th class="py-2 px-3 text-right">Elig dHW</th>
+                        <th class="py-2 px-3 text-right">Tax/WC</th>
+                        <th class="py-2 px-3 text-right">Line Claim</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800">
+                    {% for row in ledger %}
+                    <tr>
+                        <td class="py-2 px-3 text-emerald-300">{{ row.worker_hash }}</td>
+                        <td class="py-2 px-3">{{ row.scls_occupation_code }}</td>
+                        <td class="py-2 px-3 text-right">{{ row.eligible_wage_hours }}</td>
+                        <td class="py-2 px-3 text-right">{{ row.eligible_hw_hours }}</td>
+                        <td class="py-2 px-3 text-right">${{ row.w_prev }}</td>
+                        <td class="py-2 px-3 text-right">${{ row.w_req_new }}</td>
+                        <td class="py-2 px-3 text-right">${{ row.w_act_new }}</td>
+                        <td class="py-2 px-3 text-right text-emerald-400">${{ row.eligible_hourly_wage_delta }}</td>
+                        <td class="py-2 px-3 text-right text-amber-400">${{ row.voluntary_hourly_exclusion }}</td>
+                        <td class="py-2 px-3 text-right">${{ row.eligible_hourly_hw_delta }}</td>
+                        <td class="py-2 px-3 text-right">${{ row.tax_wc_hourly_delta }}</td>
+                        <td class="py-2 px-3 text-right font-bold text-white">${{ row.line_total_claim }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 p-6">
+        <h2 class="text-base font-semibold text-white mb-4">Verified Verbatim Evidence Spans</h2>
+        <div class="space-y-3">
+            {% for span in spans %}
+            <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+                <div class="flex items-center justify-between text-slate-400">
+                    <span class="font-semibold text-emerald-400">[{{ span.source_doc_type }}] {{ span.source_doc_identifier }}</span>
+                    <span>Field: {{ span.extracted_field_name }} = <strong>{{ span.extracted_value }}</strong> (chars {{ span.char_start }}..{{ span.char_end }})</span>
+                </div>
+                <blockquote class="mt-1 text-slate-300 italic">"{{ span.verbatim_quote }}"</blockquote>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

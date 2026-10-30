@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-6">
+    <div>
+        <span class="text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+            Public Acquisition Micro-Tool
+        </span>
+        <h1 class="mt-2 text-2xl font-bold text-white">SCLS / FAR 52.222-43 Margin Bleed Calculator</h1>
+        <p class="text-sm text-slate-400">Calculate your exact mandatory price adjustment entitlement for NAICS 561720 (23470 - Janitor) with strict voluntary-raise and OH/G&A/Profit exclusions.</p>
+    </div>
+
+    <form hx-post="/api/calculator" hx-target="#calc-result" hx-swap="innerHTML" class="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 rounded-xl bg-slate-900 border border-slate-800">
+        <div>
+            <label class="block text-xs text-slate-400">Contract PIID</label>
+            <input name="contract_piid" value="47PM0924C0012" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">Janitor FTE Count</label>
+            <input name="worker_count" type="number" value="25" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">Annual Hours / Worker</label>
+            <input name="annual_hours_per_worker" value="2080" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">Previous Actual Wage ($/hr)</label>
+            <input name="w_prev" value="16.50" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">New Mandatory WD Wage ($/hr)</label>
+            <input name="w_req_new" value="18.20" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">New Actual Paid Wage ($/hr)</label>
+            <input name="w_act_new" value="19.00" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">Previous H&W Rate ($/hr)</label>
+            <input name="hw_prev" value="4.57" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">New Mandatory H&W Rate ($/hr)</label>
+            <input name="hw_req_new" value="4.98" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400">New Actual H&W Rate ($/hr)</label>
+            <input name="hw_act_new" value="4.98" class="mt-1 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700 text-sm text-white">
+        </div>
+        <div class="md:col-span-3 pt-2">
+            <button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm transition">
+                Calculate Deterministic FAR 52.222-43 Recovery
+            </button>
+        </div>
+    </form>
+
+    <div id="calc-result" class="p-6 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-300">
+        Submit parameters above to compute exact recoverable entitlement.
+    </div>
+</div>
+{% endblock %}

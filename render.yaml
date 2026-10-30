@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: optionmargin-engine
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        value: sqlite:///./option_margin.db
+      - key: PII_HMAC_SECRET
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+  - type: cron
+    name: optionmargin-daily-hunter
+    runtime: python
+    schedule: "0 11 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -c "from app.main import create_prospect_audit; print(create_prospect_audit())"

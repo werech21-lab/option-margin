@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-8">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-white">Autonomous Contract Margin Recovery Ledger</h1>
+            <p class="text-sm text-slate-400">Target Wedge: NAICS 561720 (Janitorial Services) • Occupation 23470 • Zero-PII Verified</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="/calculator" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">
+                Launch Lead Magnet Calculator
+            </a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Verified Recoverable Entitlement</div>
+            <div class="mt-2 text-2xl font-bold text-emerald-400">${{ summary.total_supported_claim }}</div>
+            <div class="mt-1 text-xs text-slate-500">0.00% OH / G&A / Profit strictly enforced</div>
+        </div>
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Voluntary Raises Excluded</div>
+            <div class="mt-2 text-2xl font-bold text-amber-400">${{ summary.total_voluntary_excluded }}</div>
+            <div class="mt-1 text-xs text-slate-500">Protected against DCAA / CO audit rejection</div>
+        </div>
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Pre-Option Alerts (60-90d)</div>
+            <div class="mt-2 text-2xl font-bold text-sky-400">{{ summary.pre_option_count }}</div>
+            <div class="mt-1 text-xs text-slate-500">Actionable before Option Exercise</div>
+        </div>
+        <div class="p-5 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs uppercase tracking-wider text-slate-400">30-Day FAR Clock Active</div>
+            <div class="mt-2 text-2xl font-bold text-rose-400">{{ summary.active_clock_count }}</div>
+            <div class="mt-1 text-xs text-slate-500">Tracked from verified_receipt_date</div>
+        </div>
+    </div>
+
+    <div class="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-white">Monitored Contract Adjustment Cases</h2>
+            <span class="text-xs text-slate-400">Fail-Closed State Gate Engine</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+                <thead>
+                    <tr class="border-b border-slate-800 text-xs uppercase text-slate-400 bg-slate-950/50">
+                        <th class="py-3 px-4">Contract PIID</th>
+                        <th class="py-3 px-4">State Gate</th>
+                        <th class="py-3 px-4">Lifecycle</th>
+                        <th class="py-3 px-4">30-Day Clock</th>
+                        <th class="py-3 px-4 text-right">Wage Delta</th>
+                        <th class="py-3 px-4 text-right">H&W Delta</th>
+                        <th class="py-3 px-4 text-right">Taxes & WC</th>
+                        <th class="py-3 px-4 text-right">Total Claim</th>
+                        <th class="py-3 px-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800">
+                    {% for c in cases %}
+                    <tr class="hover:bg-slate-800/40">
+                        <td class="py-3 px-4 font-mono text-white">{{ c.piid }}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded text-xs font-semibold
+                                {% if c.state_gate == 'SUPPORTED' %}bg-emerald-500/15 text-emerald-400 border border-emerald-500/30
+                                {% elif c.state_gate == 'POTENTIAL' %}bg-sky-500/15 text-sky-400 border border-sky-500/30
+                                {% elif c.state_gate == 'INSUFFICIENT_DATA' %}bg-amber-500/15 text-amber-400 border border-amber-500/30
+                                {% else %}bg-slate-800 text-slate-400{% endif %}">
+                                {{ c.state_gate }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-slate-300">{{ c.lifecycle_status }}</td>
+                        <td class="py-3 px-4">
+                            {% if c.days_remaining_30d_clock is not none %}
+                                <span class="text-xs {% if c.is_late_notice_flagged %}text-rose-400 font-bold{% else %}text-emerald-400{% endif %}">
+                                    {{ c.days_remaining_30d_clock }}d remaining
+                                </span>
+                            {% else %}
+                                <span class="text-xs text-slate-500">Awaiting SF-30</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-4 text-right font-mono">${{ c.total_eligible_wage_delta }}</td>
+                        <td class="py-3 px-4 text-right font-mono">${{ c.total_eligible_hw_delta }}</td>
+                        <td class="py-3 px-4 text-right font-mono">${{ c.total_accompanying_taxes_wc }}</td>
+                        <td class="py-3 px-4 text-right font-mono font-bold text-emerald-400">${{ c.total_claim_amount }}</td>
+                        <td class="py-3 px-4">
+                            <a href="/cases/{{ c.id }}" class="text-xs text-emerald-400 hover:underline">Inspect Ledger &rarr;</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

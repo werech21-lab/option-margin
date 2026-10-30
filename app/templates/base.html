@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or "OptionMargin — Autonomous FAR 52.222-43 Margin Recovery" }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="min-h-full font-sans antialiased">
+    <nav class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold">OM</span>
+                <div>
+                    <a href="/" class="text-lg font-bold tracking-tight text-white">OptionMargin</a>
+                    <span class="ml-2 text-xs px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">FAR 52.222-43 Engine</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-6 text-sm font-medium">
+                <a href="/" class="text-slate-300 hover:text-white transition">CFO Dashboard</a>
+                <a href="/calculator" class="text-emerald-400 hover:text-emerald-300 transition">Public SCLS Bleed Calculator</a>
+                <a href="/api/health" class="text-slate-400 hover:text-slate-200 transition">API Health</a>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
