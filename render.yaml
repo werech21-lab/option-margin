@@ -29,6 +29,18 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USER
+        value: werech21@gmail.com
+      - key: SMTP_PASS
+        sync: false
+      - key: SAM_GOV_API_KEY
+        sync: false
+      - key: OUTBOUND_LIVE_MODE
+        value: "false"
 
   - type: cron
     name: optionmargin-daily-hunter
@@ -43,3 +55,15 @@ services:
           property: connectionString
       - key: PUBLIC_BASE_URL
         value: https://optionmargin-engine.onrender.com
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USER
+        value: werech21@gmail.com
+      - key: SMTP_PASS
+        sync: false
+      - key: SAM_GOV_API_KEY
+        sync: false
+      - key: OUTBOUND_LIVE_MODE
+        value: "false"

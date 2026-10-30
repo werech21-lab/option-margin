@@ -638,12 +638,16 @@ def run_live_sniper_pipeline(
     if db is None:
         db = SessionLocal()
     try:
+        from app.services.poc_resolver import ContractorPOCResolver
+
         teasers = USAspendingLiveService().generate_live_prospect_audits(limit=limit)
         dispatcher = OutboundEmailDispatcher()
+        resolver = ContractorPOCResolver()
         executor = Agent3Executor()
         records: list[dict[str, Any]] = []
         for teaser in teasers:
-            email = dispatcher.build_audit_email(teaser, recipient_email=recipient_email)
+            poc = resolver.resolve_poc(teaser.prospect_company_name, teaser.prospect_uei)
+            email = dispatcher.build_audit_email(teaser, recipient_email=recipient_email, poc=poc)
             payload = {
                 "idempotency_key": email.idempotency_key,
                 "recipient_email": email.recipient_email,
@@ -656,6 +660,10 @@ def run_live_sniper_pipeline(
                 "delivery_channel": email.delivery_channel,
                 "delivery_status": email.delivery_status,
                 "days_until_option": teaser.days_until_option,
+                "poc_name": poc.poc_name,
+                "poc_title": poc.poc_title,
+                "poc_email": poc.poc_email,
+                "resolution_source": poc.resolution_source,
             }
             record, created = executor.enqueue_outbox_task(
                 db,
@@ -664,6 +672,9 @@ def run_live_sniper_pipeline(
                 task_type="prospect_audit",
                 payload=payload,
             )
+            if not created:
+                record.payload_json = json.dumps(payload, default=str)
+                db.commit()
             records.append({**payload, "outbox_id": record.id, "created": created, "status": record.status})
         return {"count": len(records), "recipient_email": recipient_email, "records": records}
     finally:
