@@ -1,116 +1,146 @@
-"""Specialized Parser for Standard Form 30 (SF-30) Contract Modifications.
+"""Deterministic SF-30 parser.
 
-Extracts Modification Number, Modification Type (Option Exercise vs. Admin Change),
-FAR 52.217-9 / FAR 52.222-43 applicability, Incorporated WD Number & Revision,
-Effective Date, Verified Receipt Date, and computes the 30-Calendar-Day Notification Deadline.
+Instruction-like lines inside a contract document are removed before any field
+is read. A model suggestion cannot replace a value the deterministic parser
+already extracted, and it cannot introduce a value that is not a literal
+substring of the sanitized text.
 """
+
+from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
-from datetime import date, timedelta
-from app.schemas import EvidenceSpanSchema
+from datetime import date, datetime
 
+from app.schemas import ParsedSF30
+from app.services.llm_adapter import suggest_sf30_fields
 
-@dataclass(frozen=True)
-class ParsedSF30Modification:
-    mod_number: str
-    mod_type: str
-    incorporated_wd_number: str | None
-    incorporated_wd_revision: int | None
-    effective_date: date
-    verified_receipt_date: date
-    notification_deadline_date: date
-    written_extension_date: date | None
-    exercises_option: bool
-    cites_far_52_222_43: bool
-    document_hash: str
-    evidence_spans: list[EvidenceSpanSchema]
-
-
-MOD_NUMBER_RE = re.compile(r"\b(P\d{5}|A\d{5})\b")
-WD_REF_RE = re.compile(r"WD\s*(?:No\.?|Number)?\s*(\d{4}-\d{4})\s*(?:Rev(?:ision)?\.?\s*(\d+))?", re.IGNORECASE)
-OPTION_RE = re.compile(r"(exercise\s+option|option\s+period|52\.217-9)", re.IGNORECASE)
-FAR_43_RE = re.compile(r"52\.222-43", re.IGNORECASE)
+INJECTION_LINE = re.compile(
+    r"(?i)("
+    r"ignore\s+(all\s+|any\s+)?(previous|prior|above)\s+instructions"
+    r"|you\s+are\s+now"
+    r"|system\s+prompt"
+    r"|disregard\s+(the\s+)?(above|prior|previous)"
+    r"|new\s+instructions"
+    r"|<\s*\|\s*"
+    r"|\bact\s+as\b"
+    r"|do\s+not\s+follow\s+the\s+contract"
+    r"|override\s+the\s+(wage|modification|receipt)"
+    r"|^\s*assistant\s*:"
+    r"|^\s*developer\s*:"
+    r"|^\s*system\s*:"
+    r")"
+)
+MOD_RE = re.compile(r"\b(P\d{5})\b")
+WD_RE = re.compile(
+    r"WD[-\s]*(?P<wd>\d{4}-\d{4}).{0,48}?Rev(?:ision)?\.?\s*(?P<rev>\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
+RECEIPT_RE = re.compile(
+    r"verified[\s_-]*receipt[\s_-]*date\s*[:\-]?\s*(?P<day>\d{4}-\d{2}-\d{2})",
+    re.IGNORECASE,
+)
+FAR_RE = re.compile(r"52\.222-43")
 
 
 class SF30Parser:
-    """Deterministic parser for Standard Form 30 (Amendment of Solicitation / Modification of Contract)."""
+    """Read modification number, incorporated WD, receipt date, and clause applicability."""
 
-    def parse(
-        self,
-        sf30_text: str,
-        effective_date: date,
-        verified_receipt_date: date,
-        written_extension_date: date | None = None,
-        explicit_mod_number: str | None = None,
-    ) -> ParsedSF30Modification:
-        doc_hash = hashlib.sha256(sf30_text.encode("utf-8")).hexdigest()
-        spans: list[EvidenceSpanSchema] = []
-
-        mod_match = MOD_NUMBER_RE.search(sf30_text)
-        mod_number = explicit_mod_number or (mod_match.group(1) if mod_match else "P00001")
-
-        wd_match = WD_REF_RE.search(sf30_text)
-        inc_wd_number: str | None = None
-        inc_wd_rev: int | None = None
-        if wd_match:
-            inc_wd_number = wd_match.group(1)
-            inc_wd_rev = int(wd_match.group(2)) if wd_match.group(2) else None
-            spans.append(
-                EvidenceSpanSchema(
-                    source_doc_type="SF30_MOD",
-                    source_doc_identifier=f"SF30-{mod_number}",
-                    extracted_field_name="incorporated_wage_determination",
-                    extracted_value=f"{inc_wd_number} Rev {inc_wd_rev}" if inc_wd_rev is not None else inc_wd_number,
-                    page_number=1,
-                    char_start=wd_match.start(),
-                    char_end=wd_match.end(),
-                    verbatim_quote=sf30_text[max(0, wd_match.start() - 25) : min(len(sf30_text), wd_match.end() + 35)].strip(),
-                )
-            )
-
-        exercises_option = bool(OPTION_RE.search(sf30_text))
-        cites_far_43 = bool(FAR_43_RE.search(sf30_text))
-
-        if exercises_option:
-            opt_match = OPTION_RE.search(sf30_text)
-            if opt_match:
-                spans.append(
-                    EvidenceSpanSchema(
-                        source_doc_type="SF30_MOD",
-                        source_doc_identifier=f"SF30-{mod_number}",
-                        extracted_field_name="option_exercise_authority",
-                        extracted_value="OPTION_EXERCISE",
-                        page_number=1,
-                        char_start=opt_match.start(),
-                        char_end=opt_match.end(),
-                        verbatim_quote=sf30_text[max(0, opt_match.start() - 20) : min(len(sf30_text), opt_match.end() + 40)].strip(),
-                    )
-                )
-
-        if exercises_option:
-            mod_type = "OPTION_EXERCISE"
-        elif inc_wd_number:
-            mod_type = "WD_INCORPORATION"
-        else:
-            mod_type = "ADMIN_CHANGE"
-
-        # FAR 52.222-43(f): Contractor shall notify the Contracting Officer within 30 days
-        # after receipt of the wage determination modification, unless extended in writing.
-        deadline = verified_receipt_date + timedelta(days=30)
-
-        return ParsedSF30Modification(
-            mod_number=mod_number,
-            mod_type=mod_type,
-            incorporated_wd_number=inc_wd_number,
-            incorporated_wd_revision=inc_wd_rev,
-            effective_date=effective_date,
+    def parse(self, sf30_text: str) -> ParsedSF30:
+        document_hash = hashlib.sha256(sf30_text.encode("utf-8")).hexdigest()
+        sanitized, removed = sanitize_contract_text(sf30_text)
+        modification_number = _first(MOD_RE, sanitized)
+        wd_match = WD_RE.search(sanitized)
+        incorporated_wd_id = wd_match.group("wd") if wd_match else None
+        incorporated_wd_revision = int(wd_match.group("rev")) if wd_match else None
+        receipt_match = RECEIPT_RE.search(sanitized)
+        verified_receipt_date = _parse_iso(receipt_match.group("day")) if receipt_match else None
+        applicable = bool(FAR_RE.search(sanitized))
+        span = _evidence_span(sanitized, modification_number, incorporated_wd_id)
+        deterministic = ParsedSF30(
+            modification_number=modification_number,
+            incorporated_wd_id=incorporated_wd_id,
+            incorporated_wd_revision=incorporated_wd_revision,
             verified_receipt_date=verified_receipt_date,
-            notification_deadline_date=deadline,
-            written_extension_date=written_extension_date,
-            exercises_option=exercises_option,
-            cites_far_52_222_43=cites_far_43,
-            document_hash=doc_hash,
-            evidence_spans=spans,
+            far_52_222_43_applicable=applicable,
+            document_hash=document_hash,
+            sanitized=removed > 0,
+            evidence_span=span,
+            injection_lines_removed=removed,
         )
+        suggestion = suggest_sf30_fields(sanitized)
+        if suggestion is None:
+            return deterministic
+        return _merge_fail_closed(deterministic, suggestion, sanitized)
+
+
+def sanitize_contract_text(text: str) -> tuple[str, int]:
+    kept: list[str] = []
+    removed = 0
+    for line in text.splitlines():
+        if INJECTION_LINE.search(line):
+            removed += 1
+            continue
+        kept.append(line)
+    return "\n".join(kept), removed
+
+
+def _merge_fail_closed(deterministic: ParsedSF30, suggestion: dict, sanitized: str) -> ParsedSF30:
+    modification_number = deterministic.modification_number or _literal(suggestion.get("modification_number"), sanitized)
+    incorporated_wd_id = deterministic.incorporated_wd_id or _literal(suggestion.get("incorporated_wd_id"), sanitized)
+    revision = deterministic.incorporated_wd_revision
+    if revision is None:
+        suggested_rev = suggestion.get("incorporated_wd_revision")
+        if suggested_rev is not None and str(suggested_rev) in sanitized:
+            try:
+                revision = int(suggested_rev)
+            except (TypeError, ValueError):
+                revision = None
+    receipt = deterministic.verified_receipt_date
+    if receipt is None:
+        suggested_day = suggestion.get("verified_receipt_date")
+        if isinstance(suggested_day, str) and suggested_day in sanitized:
+            receipt = _parse_iso(suggested_day)
+    applicable = deterministic.far_52_222_43_applicable or ("52.222-43" in sanitized and bool(suggestion.get("far_52_222_43_applicable")))
+    return deterministic.model_copy(
+        update={
+            "modification_number": modification_number,
+            "incorporated_wd_id": incorporated_wd_id,
+            "incorporated_wd_revision": revision,
+            "verified_receipt_date": receipt,
+            "far_52_222_43_applicable": applicable,
+        }
+    )
+
+
+def _literal(value: object, sanitized: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if cleaned and cleaned in sanitized:
+        return cleaned
+    return None
+
+
+def _first(pattern: re.Pattern[str], text: str) -> str | None:
+    match = pattern.search(text)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _parse_iso(raw: str) -> date | None:
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _evidence_span(text: str, modification_number: str | None, wd_id: str | None) -> str:
+    needle = modification_number or wd_id or "52.222-43"
+    index = text.find(needle) if needle else -1
+    if index < 0:
+        return text[:180].strip()
+    start = max(0, index - 40)
+    end = min(len(text), index + 120)
+    return text[start:end].strip()

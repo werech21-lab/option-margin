@@ -1,0 +1,22 @@
+<section class="grid gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40 sm:grid-cols-2">
+  <div>
+    <p class="text-xs uppercase tracking-wide text-slate-500">Voluntary stripped</p>
+    <p class="font-mono text-2xl">{{ adjustment.voluntary_wage_stripped|rate }}</p>
+  </div>
+  <div>
+    <p class="text-xs uppercase tracking-wide text-slate-500">Eligible delta</p>
+    <p class="font-mono text-2xl">{{ adjustment.eligible_wage_delta|rate }}</p>
+  </div>
+  <div>
+    <p class="text-xs uppercase tracking-wide text-slate-500">Monthly bleed</p>
+    <p class="font-mono text-2xl">{{ adjustment.total_monthly_entitlement_usd|money }}</p>
+  </div>
+  <div>
+    <p class="text-xs uppercase tracking-wide text-slate-500">Annualized</p>
+    <p class="font-mono text-2xl">{{ adjustment.annualized_exposure_usd|money }}</p>
+  </div>
+  <p class="sm:col-span-2 text-xs text-slate-600 dark:text-slate-300">
+    H&amp;W delta {{ adjustment.eligible_hw_delta|rate }} · payroll tax {{ adjustment.tax_per_hour|rate }} ·
+    Overhead {{ adjustment.overhead|money }} · G&amp;A {{ adjustment.ga|money }} · Profit {{ adjustment.profit|money }}
+  </p>
+</section>

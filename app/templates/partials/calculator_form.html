@@ -1,0 +1,37 @@
+<form class="grid gap-4 md:grid-cols-2" hx-post="/api/calculate-preview" hx-target="#preview" hx-swap="innerHTML">
+  <label class="block text-sm">Workers
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="workers" value="60" inputmode="numeric">
+  </label>
+  <label class="block text-sm">Hours / worker / month
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="hours_per_worker" value="160" inputmode="decimal">
+  </label>
+  <label class="block text-sm">Actual previous wage
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="actual_prev_wage" value="22.40" inputmode="decimal">
+  </label>
+  <label class="block text-sm">New required WD wage
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="new_required_wage" value="23.40" inputmode="decimal">
+  </label>
+  <label class="block text-sm">Actual new wage
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="actual_new_wage" value="23.60" inputmode="decimal">
+  </label>
+  <label class="block text-sm">H&amp;W delta
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="hw_delta" value="0.00" inputmode="decimal">
+  </label>
+  <label class="block text-sm">FICA rate
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="fica_rate" value="0.00" inputmode="decimal">
+  </label>
+  <label class="block text-sm">FUTA rate
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="futa_rate" value="0.00" inputmode="decimal">
+  </label>
+  <label class="block text-sm">SUTA rate
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="suta_rate" value="0.00" inputmode="decimal">
+  </label>
+  <label class="block text-sm">Workers' compensation rate
+    <input class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="wc_rate" value="0.00" inputmode="decimal">
+  </label>
+  <div class="md:col-span-2">
+    <button class="rounded bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-slate-950" type="submit">Calculate exposure</button>
+    <p class="mt-2 text-xs text-slate-500">The strict base demo uses zero H&amp;W and zero statutory rates. A monitored contract can carry FICA at 0.0765. Overhead, G&amp;A, and profit are not inputs.</p>
+  </div>
+</form>
+<div id="preview" class="mt-6">{% if adjustment %}{% include "partials/preview_result.html" %}{% endif %}</div>
