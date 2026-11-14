@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Payroll upload · OptionMargin{% endblock %}
+{% block content %}
+<h1 class="font-serif text-4xl">Zero-PII payroll intake</h1>
+<p class="mt-3 max-w-3xl text-slate-700 dark:text-slate-300">Paste a register that still contains names and SSNs. The scrubber hashes those identifiers with SHA-256 before anything is written. The database row keeps the worker hash, occupation, hours, and rates.</p>
+{% if error %}
+<p class="mt-4 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{{ error }}</p>
+{% endif %}
+<form class="mt-6 grid gap-4" method="post" action="/upload">
+  <label class="text-sm">Contract
+    <select class="mt-1 w-full rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900" name="contract_id">
+      {% for contract in contracts %}
+      <option value="{{ contract.contract_id }}">{{ contract.contract_id }} — {{ contract.agency_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label class="text-sm">Payroll CSV
+    <textarea class="mt-1 h-48 w-full rounded border border-stone-300 bg-white p-3 font-mono text-xs dark:border-slate-700 dark:bg-slate-900" name="payroll_csv">employee_name,ssn,email,job_code,hours,prev_wage,new_wage,prev_hw,new_hw
+Alex Rivera,000-00-0000,alex.rivera@example.com,JAN-01,160.00,22.40,23.60,4.80,4.98
+Jordan Blake,000-00-0001,jordan.blake@example.com,JAN-01,160.00,22.40,23.40,4.80,4.98</textarea>
+  </label>
+  <button class="w-fit rounded bg-slate-950 px-4 py-2 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-slate-950" type="submit">Scrub and save</button>
+</form>
+{% if scrubbed %}
+<section class="mt-8 rounded-xl border border-emerald-300 bg-white p-4 dark:border-emerald-900 dark:bg-slate-900">
+  <h2 class="font-serif text-2xl">Saved to {{ saved_contract }}</h2>
+  <p class="mt-2 text-sm">Identifiers removed from the file: {{ stripped }}. Batch SHA-256 <span class="break-all font-mono text-xs">{{ batch_hash }}</span></p>
+  <table class="mt-4 min-w-full text-left text-sm">
+    <thead class="text-xs uppercase text-slate-500">
+      <tr><th class="py-2">worker_hash</th><th>Occupation</th><th>Hours</th><th>Prev wage</th><th>New wage</th></tr>
+    </thead>
+    <tbody>
+      {% for row in scrubbed %}
+      <tr class="border-t border-stone-200 dark:border-slate-800">
+        <td class="py-2 break-all font-mono text-[11px]">{{ row.worker_hash }}</td>
+        <td>{{ row.occupation_code }}</td>
+        <td class="font-mono">{{ row.eligible_hours }}</td>
+        <td class="font-mono">{{ row.actual_prev_wage }}</td>
+        <td class="font-mono">{{ row.actual_new_wage }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

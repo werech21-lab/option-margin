@@ -1,32 +1,75 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title or "OptionMargin — Autonomous FAR 52.222-43 Margin Recovery" }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OptionMargin{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          fontFamily: {
+            serif: ["Source Serif 4", "Georgia", "serif"],
+            sans: ["Source Sans 3", "Segoe UI", "sans-serif"],
+            mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    body { font-family: "Source Sans 3", "Segoe UI", sans-serif; }
+    .font-serif { font-family: "Source Serif 4", Georgia, serif; }
+    .font-mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  </style>
 </head>
-<body class="min-h-full font-sans antialiased">
-    <nav class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-30">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold">OM</span>
-                <div>
-                    <a href="/" class="text-lg font-bold tracking-tight text-white">OptionMargin</a>
-                    <span class="ml-2 text-xs px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">FAR 52.222-43 Engine</span>
-                </div>
-            </div>
-            <div class="flex items-center gap-6 text-sm font-medium">
-                <a href="/" class="text-slate-300 hover:text-white transition">CFO Dashboard</a>
-                <a href="/calculator" class="text-emerald-400 hover:text-emerald-300 transition">Public SCLS Bleed Calculator</a>
-                <a href="/command-center" class="text-slate-300 hover:text-white transition">5-Tab Command Center</a>
-                <a href="/api/health" class="text-slate-400 hover:text-slate-200 transition">API Health</a>
-            </div>
-        </div>
-    </nav>
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {% block content %}{% endblock %}
-    </main>
+<body class="min-h-screen bg-stone-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <header class="bg-slate-950 text-stone-100">
+    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-4">
+      <a href="/" class="flex items-center gap-3">
+        <span class="grid h-10 w-10 place-items-center rounded-md bg-emerald-400 font-mono text-sm font-medium text-slate-950">OM</span>
+        <span>
+          <span class="block font-serif text-xl leading-none">OptionMargin</span>
+          <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-emerald-300">FAR 52.222-43 · US-SCLS-1.0</span>
+        </span>
+      </a>
+      <nav class="flex flex-wrap items-center gap-1 text-sm">
+        <a class="rounded px-3 py-1.5 hover:bg-white/10" href="/calculator">Calculator</a>
+        <a class="rounded px-3 py-1.5 hover:bg-white/10" href="/dashboard">Dashboard</a>
+        <a class="rounded px-3 py-1.5 hover:bg-white/10" href="/prospects">Prospects</a>
+        <a class="rounded px-3 py-1.5 hover:bg-white/10" href="/upload">Upload</a>
+        <button type="button" id="theme-toggle" class="rounded border border-white/20 px-3 py-1.5 text-xs">Light / dark</button>
+      </nav>
+    </div>
+  </header>
+  {% if notice %}
+  <div class="bg-emerald-700 text-white">
+    <p class="mx-auto max-w-6xl px-5 py-2 text-sm">{{ notice }}</p>
+  </div>
+  {% endif %}
+  <main class="mx-auto max-w-6xl px-5 py-8">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="border-t border-stone-300 px-5 py-6 text-center text-xs text-slate-500 dark:border-slate-800">
+    Illustrative recovery math for federal service contractors. Not a legal entitlement and not a contracting-officer determination.
+    Overhead, G&amp;A, and profit stay at $0.00 under FAR 52.222-43(d).
+  </footer>
+  <script>
+    const root = document.documentElement;
+    const stored = localStorage.getItem("om-theme");
+    if (stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+      root.classList.add("dark");
+    }
+    document.getElementById("theme-toggle").addEventListener("click", function () {
+      root.classList.toggle("dark");
+      localStorage.setItem("om-theme", root.classList.contains("dark") ? "dark" : "light");
+    });
+  </script>
 </body>
 </html>

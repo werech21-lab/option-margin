@@ -1,34 +1,28 @@
-# OptionMargin — Autonomous Contract Margin Recovery Engine
+# OptionMargin
 
-**OptionMargin** is an autonomous FinOps & GovCon compliance engine built for US Federal Service Contractors (initial wedge: **NAICS 561720 Janitorial Services**). It continuously monitors Department of Labor (DOL) Service Contract Labor Standards (SCLS / McNamara-O'Hara Service Contract Act) Wage Determinations (WDs), connects them to active Federal Contracts, Standard Form 30 (SF-30) Modifications, Zero-PII Payroll registers, and Billing records, and deterministically computes exact price adjustment entitlements under **FAR 52.222-43**.
+Autonomous FAR 52.222-43 contract margin recovery for US federal service contractors. The first wedge is janitorial work, NAICS 561720, occupation 23470 Janitor.
 
-## Key Capabilities & Regulatory Safeguards
+OptionMargin compares Department of Labor wage determinations, waits for the SF-30 that incorporates a revision, and prices only the mandatory wage delta, the fixed health-and-welfare delta, and statutory payroll tax. Overhead, G&A, and profit are asserted at zero. Names and Social Security numbers are hashed before payroll is stored.
 
-1. **Applicability Trigger & Pre-Option Radar (`Agent 1: Hunter`)**
-   - Dual SHA-256 hashing (`raw_content_hash` vs. `semantic_rate_hash`) separates HTML formatting noise (`IGNORE`) from true rate increases.
-   - Enforces FAR 52.222-43 applicability: public WD updates remain in `POTENTIAL` until incorporated via an SF-30 modification, while automatically flagging contracts within **60–90 days** of an upcoming Option Period (`is_pre_option_alert = True`).
-   - Built-in **USAspending Sniper** identifies expiring NAICS 561720 contracts for zero-touch prospect audits.
-
-2. **Deterministic `Decimal` FAR 52.222-43 Quant Engine (`Agent 2: Quant`)**
-   - Zero `float` usage anywhere in financial calculations; strictly enforces `decimal.Decimal` with `ROUND_HALF_UP`.
-   - **Eligible Wage Delta Formula:**
-     $$\Delta W_{\text{eligible}} = \max\left(0.00, \min(W_{\text{act\_new}}, W_{\text{req\_new}}) - W_{\text{prev}}\right)$$
-   - Strictly excludes voluntary raises above $W_{\text{req\_new}}$ and yields `0.00` when $W_{\text{prev}} \ge W_{\text{req\_new}}$.
-   - **Accompanying Statutory Add-Ons:** Computes FICA (`7.65%` default), FUTA, SUTA, and Workers' Compensation strictly on eligible wage deltas.
-   - **Strict FAR 52.222-43(d) Exclusion:** Overhead (`0.00`), G&A (`0.00`), and Profit (`0.00`) are hard-blocked at the schema, engine, and database constraints levels.
-   - **30-Day Notification Clock:** Independently tracks `source_published_at`, `verified_receipt_date`, and `written_extension_date`.
-   - **Fail-Closed State Gates:** `ARCHIVE`, `IGNORE`, `POTENTIAL`, `INSUFFICIENT_DATA`, `SUPPORTED`.
-
-3. **Transactional Outbox, Evidence Package & Billing Reconciler (`Agent 3: Executor`)**
-   - Idempotent transactional outbox pattern (`idempotency_key`) prevents duplicate notifications or claim generations.
-   - Every input in a `SUPPORTED` claim is cryptographically and structurally linked to a verbatim `EvidenceSpan` (WD revision, SF-30 clause, scrubbed payroll batch, statutory tax notice).
-   - Tracks full lifecycle progression: `DETECTED -> SUPPORTED -> SUBMITTED -> AGREED -> BILLED -> PAID`.
-   - Includes `SampleGenerator` (`task_type = "prospect_audit"`) for the self-selling acquisition loop.
-
-## Quickstart
+## Run
 
 ```bash
 pip install -r requirements.txt
 pytest -v
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload
 ```
+
+Open http://localhost:8000. The process creates a local SQLite database and seeds janitorial contracts, wage determinations, SF-30 modifications, scrubbed payroll, and billing rows. `supabase_schema.sql` is the Postgres shape, including row-level security on all 14 tables.
+
+Copy `.env.example` to `.env` and replace the placeholder secret names. With no API keys, wage parsing, SF-30 extraction, and the USAspending prospect list use the built-in deterministic fallback.
+
+## Deploy
+
+Render deployment files are not part of this repository. Ship the container with Docker, or use the Railway config already in `railway.json`.
+
+```bash
+docker build -t optionmargin .
+docker run -p 8000:8000 optionmargin
+```
+
+The health check is `GET /api/health`.

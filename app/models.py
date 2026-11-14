@@ -1,13 +1,34 @@
-"""All 14 Core Database Tables with Audit Fields and Strict Decimal Types.
+"""Fourteen persistence tables for the FAR 52.222-43 margin engine.
 
-Supports SQLAlchemy 2.0 ORM in production and seamless air-gapped SQLite execution.
+Column names follow the master specification. observed_at (when a document was
+captured) stays distinct from effective_at (when a rate or modification binds).
 """
 
+from __future__ import annotations
+
 import uuid
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
-from app.database import Base, HAS_SQLALCHEMY
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.config import q2, q4
+from app.database import Base
 
 
 def gen_uuid() -> str:
@@ -18,296 +39,366 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-if HAS_SQLALCHEMY:
-    from sqlalchemy import (  # type: ignore
-        String,
-        Integer,
-        Boolean,
-        Date,
-        DateTime,
-        Numeric,
-        ForeignKey,
-        Text,
-        UniqueConstraint,
+class RateAmount(TypeDecorator):
+    """Numeric(10,4) that always round-trips as Decimal."""
+
+    impl = Numeric(10, 4)
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q4(value)
+
+    def process_result_value(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q4(value)
+
+
+class MoneyAmount(TypeDecorator):
+    """Numeric(12,2) currency that always round-trips as Decimal."""
+
+    impl = Numeric(12, 2)
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q2(value)
+
+    def process_result_value(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q2(value)
+
+
+class HoursAmount(TypeDecorator):
+    """Numeric(10,2) hours that always round-trip as Decimal."""
+
+    impl = Numeric(10, 2)
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q2(value)
+
+    def process_result_value(self, value: Any, dialect: Any) -> Decimal | None:
+        if value is None:
+            return None
+        return q2(value)
+
+
+class Source(Base):
+    __tablename__ = "sources"
+    __table_args__ = (
+        CheckConstraint("source_type IN ('SAM_WD', 'USASPENDING', 'ECFR')", name="ck_sources_type"),
     )
-    from sqlalchemy.orm import Mapped, mapped_column  # type: ignore
 
-    def col(*args: Any, **kwargs: Any) -> Any:
-        return mapped_column(*args, **kwargs)
-else:
-    from app.database import _ColumnField
-
-    class _DummyType:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-    String = Integer = Boolean = Date = DateTime = Numeric = ForeignKey = Text = UniqueConstraint = _DummyType  # type: ignore
-
-    def col(*args: Any, **kwargs: Any) -> Any:
-        default = kwargs.get("default")
-        unique = kwargs.get("unique", False)
-        if callable(default):
-            return _ColumnField(default_factory=default, unique=unique)
-        return _ColumnField(default=default, unique=unique)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    health_status: Mapped[str] = mapped_column(String(32), nullable=False, default="OK")
+    freshness_sla_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
 
 
-class Organization(Base):
-    __tablename__ = "organizations"
-    _unique_constraints = [["uei"]]
+class SourceSnapshot(Base):
+    __tablename__ = "source_snapshots"
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    name = col(String(255), nullable=False)
-    uei = col(String(32), unique=True, nullable=False)
-    cage_code = col(String(16), nullable=True)
-    primary_naics = col(String(16), default="561720", nullable=False)
-    fica_rate = col(Numeric(6, 4), default=Decimal("0.0765"), nullable=False)
-    futa_rate = col(Numeric(6, 4), default=Decimal("0.0060"), nullable=False)
-    suta_rate = col(Numeric(6, 4), default=Decimal("0.0210"), nullable=False)
-    workers_comp_rate = col(Numeric(6, 4), default=Decimal("0.0315"), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
-    updated_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    wd_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_content_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
-class User(Base):
-    __tablename__ = "users"
-    _unique_constraints = [["email"]]
+class ChangeEvent(Base):
+    __tablename__ = "change_events"
+    __table_args__ = (
+        CheckConstraint(
+            "gate_decision IN ('ARCHIVE', 'IGNORE', 'ANALYZE')",
+            name="ck_change_events_gate",
+        ),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    email = col(String(255), unique=True, nullable=False)
-    full_name = col(String(255), nullable=False)
-    role = col(String(50), default="CFO", nullable=False)
-    is_active = col(Boolean, default=True, nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
-
-
-class WageDetermination(Base):
-    __tablename__ = "wage_determinations"
-    _unique_constraints = [["wd_number", "revision_number"]]
-
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    wd_number = col(String(64), nullable=False)
-    revision_number = col(Integer, nullable=False)
-    locality_state = col(String(64), nullable=False)
-    locality_county = col(String(128), nullable=False)
-    source_published_at = col(Date, nullable=False)
-    raw_content_hash = col(String(64), nullable=False)
-    semantic_rate_hash = col(String(64), nullable=False)
-    hw_rate_standard = col(Numeric(10, 4), nullable=False)
-    hw_rate_eo13706 = col(Numeric(10, 4), nullable=False)
-    source_url = col(Text, nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    wd_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    previous_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    changed_fields_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    evidence_locations_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    parser_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    gate_decision: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
-class WDOccupationRate(Base):
-    __tablename__ = "wd_occupation_rates"
-    _unique_constraints = [["wd_id", "occupation_code"]]
+class WageRate(Base):
+    __tablename__ = "wage_rates"
+    __table_args__ = (
+        UniqueConstraint("wd_id", "revision", "occupation_code", "locality", name="uq_wage_rate_row"),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    wd_id = col(String(36), ForeignKey("wage_determinations.id"), nullable=False)
-    occupation_code = col(String(16), nullable=False)
-    occupation_title = col(String(255), nullable=False)
-    hourly_rate = col(Numeric(10, 4), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    wd_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    occupation_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    occupation_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    locality: Mapped[str] = mapped_column(String(255), nullable=False)
+    hourly_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    hw_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_span: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
 class Contract(Base):
     __tablename__ = "contracts"
-    _unique_constraints = [["org_id", "piid"]]
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    piid = col(String(64), nullable=False)
-    agency_name = col(String(255), nullable=False)
-    naics_code = col(String(16), default="561720", nullable=False)
-    psc_code = col(String(16), default="S201", nullable=False)
-    pop_state = col(String(64), nullable=False)
-    pop_county = col(String(128), nullable=False)
-    wd_number = col(String(64), nullable=False)
-    active_wd_id = col(String(36), ForeignKey("wage_determinations.id"), nullable=True)
-    current_option_year = col(Integer, default=0, nullable=False)
-    next_option_start_date = col(Date, nullable=False)
-    annual_estimated_hours = col(Numeric(12, 2), default=Decimal("20800.00"), nullable=False)
-    is_eo13706_applicable = col(Boolean, default=True, nullable=False)
-    has_complex_cba = col(Boolean, default=False, nullable=False)
-    status = col(String(32), default="ACTIVE", nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    award_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agency_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    naics_code: Mapped[str] = mapped_column(String(16), nullable=False, default="561720")
+    recipient_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    place_of_performance_county: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    place_of_performance_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mapped_wd_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    far_clause_version: Mapped[str] = mapped_column(String(64), nullable=False, default="FAR 52.222-43")
+    is_cba: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fica_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0765"))
+    futa_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    suta_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    wc_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    current_option_year: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    next_option_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-
-class ContractModification(Base):
-    __tablename__ = "contract_modifications"
-    _unique_constraints = [["contract_id", "mod_number"]]
-
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    contract_id = col(String(36), ForeignKey("contracts.id"), nullable=False)
-    mod_number = col(String(32), nullable=False)
-    mod_type = col(String(64), nullable=False)
-    incorporated_wd_id = col(String(36), ForeignKey("wage_determinations.id"), nullable=True)
-    effective_date = col(Date, nullable=False)
-    verified_receipt_date = col(Date, nullable=False)
-    notification_deadline_date = col(Date, nullable=False)
-    written_extension_date = col(Date, nullable=True)
-    sf30_block14_text = col(Text, nullable=False)
-    document_hash = col(String(64), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    versions: Mapped[list[ContractVersion]] = relationship(back_populates="contract")
+    cases: Mapped[list[AdjustmentCase]] = relationship(back_populates="contract")
 
 
-class OccupationMapping(Base):
-    __tablename__ = "occupation_mappings"
-    _unique_constraints = [["org_id", "internal_job_code"]]
+class ContractVersion(Base):
+    __tablename__ = "contract_versions"
+    __table_args__ = (
+        UniqueConstraint("contract_id", "modification_number", name="uq_contract_mod"),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    internal_job_code = col(String(64), nullable=False)
-    internal_job_title = col(String(255), nullable=False)
-    scls_occupation_code = col(String(16), nullable=False)
-    scls_occupation_title = col(String(255), nullable=False)
-    is_verified = col(Boolean, default=True, nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.contract_id"), nullable=False)
+    modification_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    sf30_document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    incorporated_wd_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    incorporated_wd_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    published_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    verified_receipt_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_bilateral_agreed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    agreed_adjustment_amount: Mapped[Decimal | None] = mapped_column(MoneyAmount(), nullable=True)
+    evidence_span: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-
-class PayrollBatch(Base):
-    __tablename__ = "payroll_batches"
-
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    contract_id = col(String(36), ForeignKey("contracts.id"), nullable=False)
-    period_start = col(Date, nullable=False)
-    period_end = col(Date, nullable=False)
-    source_system = col(String(64), default="ADP_WORKFORCE_NOW", nullable=False)
-    total_regular_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    total_overtime_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    total_vacation_holiday_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    pii_fields_stripped = col(Integer, default=0, nullable=False)
-    batch_hash = col(String(64), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    contract: Mapped[Contract] = relationship(back_populates="versions")
 
 
-class PayrollLineItem(Base):
-    __tablename__ = "payroll_line_items"
+class ContractOccupationMapping(Base):
+    __tablename__ = "contract_occupation_mappings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "contract_id", "client_job_code", name="uq_occ_map"),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    batch_id = col(String(36), ForeignKey("payroll_batches.id"), nullable=False)
-    worker_hash = col(String(64), nullable=False)
-    internal_job_code = col(String(64), nullable=False)
-    scls_occupation_code = col(String(16), nullable=True)
-    regular_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    overtime_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    vacation_holiday_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    actual_prev_wage_rate = col(Numeric(10, 4), nullable=False)
-    actual_new_wage_rate = col(Numeric(10, 4), nullable=False)
-    actual_prev_hw_rate = col(Numeric(10, 4), nullable=False)
-    actual_new_hw_rate = col(Numeric(10, 4), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.contract_id"), nullable=False)
+    client_job_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    wd_occupation_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    wd_occupation_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_supported_scope: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class PayrollRow(Base):
+    __tablename__ = "payroll_rows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.contract_id"), nullable=False, index=True)
+    worker_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    occupation_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    pay_period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    pay_period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    eligible_hours: Mapped[Decimal] = mapped_column(HoursAmount(), nullable=False)
+    actual_prev_wage: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    actual_new_wage: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    actual_prev_hw: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    actual_new_hw: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class AdjustmentCase(Base):
     __tablename__ = "adjustment_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('POTENTIAL', 'INSUFFICIENT_DATA', 'SUPPORTED', 'SUBMITTED', 'AGREED', 'BILLED', 'PAID')",
+            name="ck_cases_status",
+        ),
+        CheckConstraint(
+            "event_type IN ('WAGE_REVISION', 'OPTION_PERIOD_ALERT')",
+            name="ck_cases_event_type",
+        ),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    contract_id = col(String(36), ForeignKey("contracts.id"), nullable=False)
-    modification_id = col(String(36), ForeignKey("contract_modifications.id"), nullable=True)
-    old_wd_id = col(String(36), ForeignKey("wage_determinations.id"), nullable=False)
-    new_wd_id = col(String(36), ForeignKey("wage_determinations.id"), nullable=False)
-    state_gate = col(String(32), nullable=False)
-    lifecycle_status = col(String(32), default="DETECTED", nullable=False)
-    is_pre_option_alert = col(Boolean, default=False, nullable=False)
-    days_until_option = col(Integer, nullable=True)
-    days_remaining_30d_clock = col(Integer, nullable=True)
-    is_late_notice_flagged = col(Boolean, default=False, nullable=False)
-    total_eligible_hours = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    total_eligible_wage_delta = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    total_eligible_hw_delta = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    total_accompanying_taxes_wc = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    voluntary_raise_excluded_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    overhead_excluded_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    ga_excluded_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    profit_excluded_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    total_claim_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    gate_reason = col(Text, nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
-    updated_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.contract_id"), nullable=False, index=True)
+    change_event_id: Mapped[str | None] = mapped_column(ForeignKey("change_events.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    estimated_monthly_exposure_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    annualized_exposure_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    agreed_adjustment_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    billed_collected_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    unbilled_leakage_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    evidence_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    missing_fields_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    next_action: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    verified_receipt_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    filing_deadline_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rule_pack_version: Mapped[str] = mapped_column(String(32), nullable=False, default="US-SCLS-1.0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
-
-class CalculationLedgerEntry(Base):
-    __tablename__ = "calculation_ledger_entries"
-
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    case_id = col(String(36), ForeignKey("adjustment_cases.id"), nullable=False)
-    scls_occupation_code = col(String(16), nullable=False)
-    worker_hash = col(String(64), nullable=False)
-    eligible_wage_hours = col(Numeric(12, 4), nullable=False)
-    eligible_hw_hours = col(Numeric(12, 4), nullable=False)
-    overtime_hours_excluded_from_hw = col(Numeric(12, 4), default=Decimal("0.0000"), nullable=False)
-    w_prev = col(Numeric(10, 4), nullable=False)
-    w_req_new = col(Numeric(10, 4), nullable=False)
-    w_act_new = col(Numeric(10, 4), nullable=False)
-    eligible_hourly_wage_delta = col(Numeric(10, 4), nullable=False)
-    voluntary_hourly_exclusion = col(Numeric(10, 4), nullable=False)
-    hw_prev = col(Numeric(10, 4), nullable=False)
-    hw_req_new = col(Numeric(10, 4), nullable=False)
-    hw_act_new = col(Numeric(10, 4), nullable=False)
-    eligible_hourly_hw_delta = col(Numeric(10, 4), nullable=False)
-    combined_tax_wc_rate = col(Numeric(6, 4), nullable=False)
-    tax_wc_hourly_delta = col(Numeric(10, 4), nullable=False)
-    line_wage_entitlement = col(Numeric(14, 2), nullable=False)
-    line_hw_entitlement = col(Numeric(14, 2), nullable=False)
-    line_tax_wc_entitlement = col(Numeric(14, 2), nullable=False)
-    line_total_claim = col(Numeric(14, 2), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    contract: Mapped[Contract] = relationship(back_populates="cases")
+    change_event: Mapped[ChangeEvent | None] = relationship()
+    calculations: Mapped[list[CalculationVersion]] = relationship(
+        back_populates="case",
+        order_by="CalculationVersion.version_num",
+    )
+    evidence_links: Mapped[list[EvidenceLink]] = relationship(back_populates="case")
+    outbox_rows: Mapped[list[DeliveryOutbox]] = relationship(back_populates="case")
+    billing_matches: Mapped[list[BillingMatch]] = relationship(back_populates="case")
 
 
-class EvidenceSpan(Base):
-    __tablename__ = "evidence_spans"
+class CalculationVersion(Base):
+    __tablename__ = "calculation_versions"
+    __table_args__ = (
+        UniqueConstraint("case_id", "version_num", name="uq_calc_version"),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    case_id = col(String(36), ForeignKey("adjustment_cases.id"), nullable=False)
-    source_doc_type = col(String(64), nullable=False)
-    source_doc_identifier = col(String(128), nullable=False)
-    extracted_field_name = col(String(128), nullable=False)
-    extracted_value = col(String(128), nullable=False)
-    page_number = col(Integer, default=1, nullable=False)
-    char_start = col(Integer, default=0, nullable=False)
-    char_end = col(Integer, default=0, nullable=False)
-    verbatim_quote = col(Text, nullable=False)
-    confidence_score = col(Numeric(5, 4), default=Decimal("1.0000"), nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("adjustment_cases.case_id"), nullable=False, index=True)
+    version_num: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_workers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_monthly_hours: Mapped[Decimal] = mapped_column(HoursAmount(), nullable=False, default=Decimal("0.00"))
+    mandatory_wage_delta: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    voluntary_wage_stripped: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    mandatory_hw_delta: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    accompanying_tax_hourly: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False, default=Decimal("0.0000"))
+    monthly_base_entitlement_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    monthly_hw_entitlement_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    monthly_tax_entitlement_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    total_monthly_entitlement_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False, default=Decimal("0.00"))
+    breakdown_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-
-class BillingReconciliation(Base):
-    __tablename__ = "billing_reconciliations"
-
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=False)
-    case_id = col(String(36), ForeignKey("adjustment_cases.id"), nullable=False)
-    executed_mod_number = col(String(32), nullable=True)
-    agreed_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    invoice_number = col(String(64), nullable=True)
-    billed_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    billed_at = col(Date, nullable=True)
-    paid_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    paid_at = col(Date, nullable=True)
-    variance_amount = col(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
-    reconciliation_status = col(String(32), default="PENDING_MOD", nullable=False)
-    created_at = col(DateTime, default=utcnow, nullable=False)
+    case: Mapped[AdjustmentCase] = relationship(back_populates="calculations")
 
 
-class TransactionalOutbox(Base):
-    __tablename__ = "transactional_outbox"
-    _unique_constraints = [["idempotency_key"]]
+class EvidenceLink(Base):
+    __tablename__ = "evidence_links"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('SAM_WD', 'SF30_MOD', 'PAYROLL_FEED')",
+            name="ck_evidence_source",
+        ),
+    )
 
-    id = col(String(36), primary_key=True, default=gen_uuid)
-    org_id = col(String(36), ForeignKey("organizations.id"), nullable=True)
-    idempotency_key = col(String(128), unique=True, nullable=False)
-    task_type = col(String(64), nullable=False)
-    payload_json = col(Text, nullable=False)
-    status = col(String(32), default="PENDING", nullable=False)
-    retry_count = col(Integer, default=0, nullable=False)
-    result_summary = col(Text, nullable=True)
-    created_at = col(DateTime, default=utcnow, nullable=False)
-    processed_at = col(DateTime, nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("adjustment_cases.case_id"), nullable=False, index=True)
+    field_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    field_value: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    citation_span: Mapped[str] = mapped_column(Text, nullable=False)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    case: Mapped[AdjustmentCase] = relationship(back_populates="evidence_links")
+
+
+class DeliveryOutbox(Base):
+    __tablename__ = "delivery_outbox"
+    __table_args__ = (
+        CheckConstraint("channel IN ('EMAIL', 'WEBHOOK', 'INTERNAL_TASK')", name="ck_outbox_channel"),
+        CheckConstraint(
+            "status IN ('PENDING', 'SENT', 'FAILED', 'DEAD_LETTER')",
+            name="ck_outbox_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("adjustment_cases.case_id"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    case: Mapped[AdjustmentCase] = relationship(back_populates="outbox_rows")
+
+
+class BillingMatch(Base):
+    __tablename__ = "billing_matches"
+    __table_args__ = (
+        CheckConstraint(
+            "reconciliation_status IN ('MATCHED', 'UNDERBILLED_LEAKAGE', 'PENDING')",
+            name="ck_billing_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("adjustment_cases.case_id"), nullable=False, index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.contract_id"), nullable=False)
+    invoice_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    billing_period: Mapped[str] = mapped_column(String(32), nullable=False)
+    expected_adjusted_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    actual_billed_rate: Mapped[Decimal] = mapped_column(RateAmount(), nullable=False)
+    hours_billed: Mapped[Decimal] = mapped_column(HoursAmount(), nullable=False)
+    variance_leakage_usd: Mapped[Decimal] = mapped_column(MoneyAmount(), nullable=False)
+    reconciliation_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    case: Mapped[AdjustmentCase] = relationship(back_populates="billing_matches")
+
+
+class JobRun(Base):
+    __tablename__ = "job_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('CLAIMED', 'COMPLETED', 'FAILED')", name="ck_job_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metrics_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

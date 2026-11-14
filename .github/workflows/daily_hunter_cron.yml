@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 11 * * *'
+    - cron: "0 11 * * *"
   workflow_dispatch:
 
 jobs:
@@ -17,15 +17,14 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run 8 Golden Edge Cases Test Suite
+      - name: Run golden cases
         run: pytest -v
 
-      - name: Trigger Daily USAspending & SAM.gov Prospect Sniper
+      - name: Offline prospect summary
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: |
-          python -c "from app.main import create_prospect_audit; print(create_prospect_audit())"
+        run: python -c "from app.main import create_prospect_audit; print(create_prospect_audit())"

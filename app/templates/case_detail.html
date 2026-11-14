@@ -1,75 +1,121 @@
 {% extends "base.html" %}
+{% block title %}{{ case.case_id }} · OptionMargin{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div class="flex items-center justify-between">
-        <div>
-            <a href="/" class="text-xs text-slate-400 hover:text-white">&larr; Back to Dashboard</a>
-            <h1 class="mt-1 text-2xl font-bold text-white">Case Audit Trail: {{ case.piid }}</h1>
-            <p class="text-sm text-slate-400">{{ case.gate_reason }}</p>
-        </div>
-        <div class="text-right">
-            <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                {{ case.state_gate }} • {{ case.lifecycle_status }}
-            </span>
-            <div class="mt-2 text-2xl font-mono font-bold text-emerald-400">${{ case.total_claim_amount }}</div>
-        </div>
-    </div>
-
-    <div class="rounded-xl bg-slate-900 border border-slate-800 p-6">
-        <h2 class="text-base font-semibold text-white mb-4">Deterministic Worker-Hash Calculation Ledger</h2>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs font-mono">
-                <thead>
-                    <tr class="border-b border-slate-800 text-slate-400">
-                        <th class="py-2 px-3">Worker Hash</th>
-                        <th class="py-2 px-3">Occ</th>
-                        <th class="py-2 px-3 text-right">Wage Hrs</th>
-                        <th class="py-2 px-3 text-right">H&W Hrs</th>
-                        <th class="py-2 px-3 text-right">W_prev</th>
-                        <th class="py-2 px-3 text-right">W_req</th>
-                        <th class="py-2 px-3 text-right">W_act</th>
-                        <th class="py-2 px-3 text-right">Elig dW</th>
-                        <th class="py-2 px-3 text-right">Vol Excl</th>
-                        <th class="py-2 px-3 text-right">Elig dHW</th>
-                        <th class="py-2 px-3 text-right">Tax/WC</th>
-                        <th class="py-2 px-3 text-right">Line Claim</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-800">
-                    {% for row in ledger %}
-                    <tr>
-                        <td class="py-2 px-3 text-emerald-300">{{ row.worker_hash }}</td>
-                        <td class="py-2 px-3">{{ row.scls_occupation_code }}</td>
-                        <td class="py-2 px-3 text-right">{{ row.eligible_wage_hours }}</td>
-                        <td class="py-2 px-3 text-right">{{ row.eligible_hw_hours }}</td>
-                        <td class="py-2 px-3 text-right">${{ row.w_prev }}</td>
-                        <td class="py-2 px-3 text-right">${{ row.w_req_new }}</td>
-                        <td class="py-2 px-3 text-right">${{ row.w_act_new }}</td>
-                        <td class="py-2 px-3 text-right text-emerald-400">${{ row.eligible_hourly_wage_delta }}</td>
-                        <td class="py-2 px-3 text-right text-amber-400">${{ row.voluntary_hourly_exclusion }}</td>
-                        <td class="py-2 px-3 text-right">${{ row.eligible_hourly_hw_delta }}</td>
-                        <td class="py-2 px-3 text-right">${{ row.tax_wc_hourly_delta }}</td>
-                        <td class="py-2 px-3 text-right font-bold text-white">${{ row.line_total_claim }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="rounded-xl bg-slate-900 border border-slate-800 p-6">
-        <h2 class="text-base font-semibold text-white mb-4">Verified Verbatim Evidence Spans</h2>
-        <div class="space-y-3">
-            {% for span in spans %}
-            <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs">
-                <div class="flex items-center justify-between text-slate-400">
-                    <span class="font-semibold text-emerald-400">[{{ span.source_doc_type }}] {{ span.source_doc_identifier }}</span>
-                    <span>Field: {{ span.extracted_field_name }} = <strong>{{ span.extracted_value }}</strong> (chars {{ span.char_start }}..{{ span.char_end }})</span>
-                </div>
-                <blockquote class="mt-1 text-slate-300 italic">"{{ span.verbatim_quote }}"</blockquote>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
+<p class="font-mono text-xs uppercase tracking-[0.16em] text-slate-500">{{ case.event_type }} · {{ case.rule_pack_version }}</p>
+<div class="mt-2 flex flex-wrap items-center gap-3">
+  <h1 class="font-serif text-4xl">{{ case.case_id }}</h1>
+  <span class="rounded-full bg-stone-200 px-3 py-1 text-xs font-semibold dark:bg-slate-800">{{ case.status }}</span>
 </div>
+<p class="mt-2 text-slate-700 dark:text-slate-300">{{ contract.title }} · {{ contract.agency_name }} · {{ contract.contract_id }}</p>
+<p class="mt-1 text-sm">Next action: {{ case.next_action }}</p>
+<div class="mt-4 flex flex-wrap gap-3 text-sm">
+  <a class="rounded bg-slate-950 px-3 py-2 text-white dark:bg-emerald-400 dark:text-slate-950" href="/cases/{{ case.case_id }}/claim.csv">CO Claim Worksheet CSV</a>
+  <a class="rounded border border-slate-400 px-3 py-2" href="/cases/{{ case.case_id }}/evidence.json">Audit Evidence JSON</a>
+  <a class="rounded border border-slate-400 px-3 py-2" href="/cases/{{ case.case_id }}/evidence.html">Evidence dossier HTML</a>
+</div>
+
+<section class="mt-8 grid gap-4 lg:grid-cols-2">
+  <article class="rounded-xl border border-stone-300 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="font-serif text-2xl">WD revision diff · 23470 Janitor</h2>
+    {% if event %}
+    <p class="mt-1 text-sm text-slate-500">{{ event.wd_id }} Rev {{ event.previous_revision }} → Rev {{ event.current_revision }} · gate {{ event.gate_decision }}</p>
+    <div class="mt-4 grid gap-3 sm:grid-cols-2">
+      <div class="rounded border border-stone-200 p-3 dark:border-slate-700">
+        <p class="text-xs uppercase text-slate-500">Previous</p>
+        <p class="font-mono text-2xl">{% if previous_rate %}{{ previous_rate.hourly_rate|rate }}{% else %}—{% endif %}</p>
+        <p class="mt-2 break-all font-mono text-[11px]">SHA-256 {{ previous_hash or "not captured" }}</p>
+      </div>
+      <div class="rounded border border-emerald-300 p-3 dark:border-emerald-800">
+        <p class="text-xs uppercase text-slate-500">Current required</p>
+        <p class="font-mono text-2xl">{% if current_rate %}{{ current_rate.hourly_rate|rate }}{% else %}—{% endif %}</p>
+        <p class="mt-2 break-all font-mono text-[11px]">SHA-256 {{ current_hash or event.document_hash }}</p>
+      </div>
+    </div>
+    {% if current_rate and previous_rate %}
+    <p class="mt-3 text-sm">Rate jump {{ previous_rate.hourly_rate|rate }} → {{ current_rate.hourly_rate|rate }}. H&amp;W {{ previous_rate.hw_rate|rate }} → {{ current_rate.hw_rate|rate }}.</p>
+    {% endif %}
+    {% else %}
+    <p class="mt-3 text-sm">No wage-determination change event is linked.</p>
+    {% endif %}
+  </article>
+  <article class="rounded-xl border border-stone-300 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="font-serif text-2xl">SF-30 and the 30-day clock</h2>
+    <p class="mt-2 text-sm">Publication is not receipt. The filing deadline is the verified receipt date plus 30 calendar days.</p>
+    <dl class="mt-4 space-y-2 text-sm">
+      <div class="flex justify-between gap-4"><dt>Published</dt><dd class="font-mono">{% if event and event.source_published_at %}{{ event.source_published_at.date() }}{% else %}—{% endif %}</dd></div>
+      <div class="flex justify-between gap-4"><dt>Verified receipt</dt><dd class="font-mono">{{ case.verified_receipt_date or "Missing" }}</dd></div>
+      <div class="flex justify-between gap-4"><dt>Filing deadline</dt><dd class="font-mono">{{ case.filing_deadline_date or "Not started" }}</dd></div>
+      <div class="flex justify-between gap-4"><dt>Countdown</dt><dd>{% if days_remaining is none %}Receipt not verified{% else %}{{ days_remaining }} days{% endif %}</dd></div>
+    </dl>
+    {% if mods %}
+    <ul class="mt-4 space-y-2 text-sm">
+      {% for mod in mods %}
+      <li class="rounded border border-stone-200 p-2 dark:border-slate-700">
+        <span class="font-mono">{{ mod.modification_number }}</span>
+        incorporates {{ mod.incorporated_wd_id }} Rev {{ mod.incorporated_wd_revision }}.
+        Receipt {{ mod.verified_receipt_date }}. Effective {{ mod.effective_at }}.
+        <span class="mt-1 block break-all font-mono text-[11px]">SHA-256 {{ mod.sf30_document_hash }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="mt-4 text-sm text-amber-800 dark:text-amber-300">No applicable contract modification is on file. Status stays {{ case.status }}.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="mt-6 overflow-x-auto rounded-xl border border-stone-300 bg-white dark:border-slate-800 dark:bg-slate-900">
+  <h2 class="px-4 pt-4 font-serif text-2xl">Calculation</h2>
+  {% if latest %}
+  <table class="mt-3 min-w-full text-left text-sm">
+    <tbody>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Workers / hours</th><td class="px-4 py-2 font-mono">{{ latest.total_workers }} / {{ latest.total_monthly_hours }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Mandatory wage delta</th><td class="px-4 py-2 font-mono">{{ latest.mandatory_wage_delta|rate }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Voluntary stripped</th><td class="px-4 py-2 font-mono">{{ latest.voluntary_wage_stripped|rate }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">H&amp;W delta</th><td class="px-4 py-2 font-mono">{{ latest.mandatory_hw_delta|rate }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Payroll tax / hour</th><td class="px-4 py-2 font-mono">{{ latest.accompanying_tax_hourly|rate }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Monthly entitlement</th><td class="px-4 py-2 font-mono">{{ latest.total_monthly_entitlement_usd|money }}</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Overhead</th><td class="px-4 py-2 font-mono">$0.00</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">G&amp;A</th><td class="px-4 py-2 font-mono">$0.00</td></tr>
+      <tr class="border-t border-stone-200 dark:border-slate-800"><th class="px-4 py-2 font-medium">Profit</th><td class="px-4 py-2 font-mono">$0.00</td></tr>
+    </tbody>
+  </table>
+  <p class="px-4 py-3 text-xs text-slate-500">Version {{ latest.version_num }} of {{ versions|length }}. Computed {{ latest.computed_at }}.</p>
+  {% else %}
+  <p class="p-4 text-sm">No calculation version is stored.</p>
+  {% endif %}
+</section>
+
+<section class="mt-6 overflow-x-auto rounded-xl border border-stone-300 bg-white dark:border-slate-800 dark:bg-slate-900">
+  <h2 class="px-4 pt-4 font-serif text-2xl">Evidence links</h2>
+  <table class="mt-3 min-w-full text-left text-sm">
+    <thead class="text-xs uppercase text-slate-500">
+      <tr><th class="px-4 py-2">Field</th><th class="px-4 py-2">Value</th><th class="px-4 py-2">Source</th><th class="px-4 py-2">SHA-256</th><th class="px-4 py-2">Span</th></tr>
+    </thead>
+    <tbody>
+      {% for link in evidence %}
+      <tr class="border-t border-stone-200 dark:border-slate-800">
+        <td class="px-4 py-2">{{ link.field_name }}</td>
+        <td class="px-4 py-2 font-mono text-xs">{{ link.field_value }}</td>
+        <td class="px-4 py-2">{{ link.source_type }}</td>
+        <td class="px-4 py-2 break-all font-mono text-[11px]">{{ link.document_hash }}</td>
+        <td class="px-4 py-2 text-xs">{{ link.citation_span }}</td>
+      </tr>
+      {% else %}
+      <tr><td class="px-4 py-4" colspan="5">Evidence is incomplete. Missing: {{ case.missing_fields_json|join(", ") }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if billing %}
+<section class="mt-6 rounded-xl border border-red-200 bg-white p-4 dark:border-red-900 dark:bg-slate-900">
+  <h2 class="font-serif text-2xl">Billing match</h2>
+  <ul class="mt-3 space-y-2 text-sm">
+    {% for match in billing %}
+    <li>{{ match.invoice_number }} · expected {{ match.expected_adjusted_rate|rate }} · billed {{ match.actual_billed_rate|rate }} · {{ match.hours_billed }} hours · variance {{ match.variance_leakage_usd|money }} · {{ match.reconciliation_status }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% endblock %}

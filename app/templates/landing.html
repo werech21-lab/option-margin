@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}OptionMargin — FAR 52.222-43 margin recovery{% endblock %}
+{% block content %}
+<section class="grid items-start gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+  <div>
+    <p class="font-mono text-xs uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">NAICS 561720 · occupation 23470 Janitor</p>
+    <h1 class="mt-3 max-w-3xl font-serif text-4xl leading-tight text-slate-950 dark:text-stone-50 md:text-5xl">Autonomous FAR 52.222-43 Contract Margin Recovery for Federal Service Contractors.</h1>
+    <p class="mt-4 max-w-2xl text-lg text-slate-700 dark:text-slate-300">OptionMargin watches area wage determinations, waits for the SF-30 that actually incorporates them, and prices only the mandatory wage, fixed H&amp;W, and statutory tax delta. A public revision by itself stays POTENTIAL.</p>
+    <div class="mt-6 flex flex-wrap gap-3 text-sm">
+      <a class="rounded bg-slate-950 px-4 py-2 font-semibold text-white dark:bg-emerald-400 dark:text-slate-950" href="/dashboard">Open the seeded workspace</a>
+      <a class="rounded border border-slate-400 px-4 py-2" href="/cases/CASE-DEMO-017">View CASE-DEMO-017</a>
+    </div>
+  </div>
+  <aside class="rounded-xl border border-stone-300 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="font-serif text-2xl">Price the demo</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">60 janitors, 160 hours, $22.40 to a $23.40 determination, paid at $23.60.</p>
+    <div class="mt-4">{% include "partials/calculator_form.html" %}</div>
+  </aside>
+</section>
+<section class="mt-10 grid gap-6 lg:grid-cols-2">
+  <div class="rounded-xl border border-stone-300 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="font-serif text-2xl">Generate Free Contract Audit Sample</h2>
+    <form class="mt-4 grid gap-3" hx-post="/api/lead" hx-target="#sample-audit" hx-swap="innerHTML">
+      <input class="rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" name="company_name" placeholder="Company name" required>
+      <input class="rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" name="email" type="email" placeholder="Work email" required>
+      <input class="rounded border border-stone-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" name="contract_id" placeholder="Contract number (optional)">
+      <button class="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" type="submit">Generate Free Contract Audit Sample</button>
+    </form>
+    <div id="sample-audit" class="mt-4"></div>
+  </div>
+  <div class="rounded-xl border border-stone-300 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+    <h2 class="font-serif text-2xl">What the engine will not do</h2>
+    <ul class="mt-3 space-y-2 text-sm leading-6 text-slate-700 dark:text-slate-300">
+      <li>It will not call a case SUPPORTED from a publication date alone. The 30-day clock starts at the verified receipt date.</li>
+      <li>It will not price the dollars a contractor chooses to pay above the new required rate.</li>
+      <li>It will not add overhead, G&amp;A, or profit. Those amounts are asserted at zero.</li>
+      <li>It will not keep names or Social Security numbers. Payroll is stored as a SHA-256 worker hash.</li>
+    </ul>
+  </div>
+</section>
+{% endblock %}
